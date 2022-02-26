@@ -15,15 +15,19 @@ cc_library(
 cc_binary(
   name = "client",
   srcs = ["client_main.cc"],
-#   hdrs = ["client_main.h"],
   deps = [
     "//protos:afs_cc_grpc",
     "@com_github_grpc_grpc//:grpc++",
-    ":fuse",
   ],
   copts = [
     "-I/usr/local/include/fuse3/",
     "-std=c++17",
     # "-I/usr/local/include/fuse3/",
  ],
+ defines = [
+    "_FILE_OFFSET_BITS=64",
+    "FUSE_USE_VERSION=31"
+ ],
+ linkstatic = True,
+ linkopts = ["-ldl", "-lpthread", "-lfuse"],
 )
