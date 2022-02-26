@@ -18,3 +18,61 @@ message HelloRequest {
 message HelloReply {
   string message = 1;
 }
+
+message FileSystemRequest {
+  string path = 1;
+}
+
+message FileSystemRemoveRequest {
+  string path = 1;
+}
+
+message FileSystemCreateRequest {
+  string path = 1;
+}
+
+message FileSystemRenameRequest {
+  string path = 1;
+}
+
+message FileSystemMakedirRequest {
+  string path = 1;
+}
+
+message FileSystemRemovedirRequest {
+  string path = 1;
+}
+
+message FileSystemSetLockRequest {
+  string path = 1;
+}
+
+message FileSystemReleaseLockRequest {
+  string path = 1;
+}
+
+message FileSystemResponse {
+  string status = 1;
+  string data = 2;
+}
+
+service FileSystem {
+  // Fetch: Returns the status and (optionally) data of the specified file or directory.
+  rpc Fetch (FileSystemRequest) returns (FileSystemResponse) {} 
+  // Store the status and (optionally) data of the specified file.
+  rpc Store (FileSystemRequest) returns (FileSystemResponse) {}
+  // Deletes the specified file
+  rpc Remove (FileSystemRemoveRequest) returns (FileSystemResponse) {}
+  // Create a new file
+  rpc Create (FileSystemCreateRequest) returns (FileSystemResponse) {}  
+  // Change the name of a file or directory
+  rpc Rename (FileSystemRenameRequest) returns (FileSystemResponse) {}
+  // Makedir creates a new directory
+  rpc Makedir (FileSystemMakedirRequest) returns (FileSystemResponse) {}
+  // Removedir deletes the specified directory which must be empty
+  rpc Removedir (FileSystemRemovedirRequest) returns (FileSystemResponse) {}
+  // Set lock
+  // rpc SetLock (FileSystemSetLockRequest) returns (FileSystemResponse) {}
+  // Release lock: Unlocks the specified file or directory
+  // rpc ReleaseLock (FileSystemReleaseLockRequest) returns (FileSystemResponse) {}
+}

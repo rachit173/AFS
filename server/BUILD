@@ -6,6 +6,7 @@ cc_binary(
   srcs = ["server_main.cc"],
   deps = [
     "//protos:afs_cc_grpc",
+    "@com_github_grpc_grpc//:grpc++_reflection",
     "@com_github_grpc_grpc//:grpc++",
   ],
 )
