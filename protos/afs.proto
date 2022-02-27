@@ -71,8 +71,16 @@ service FileSystem {
   rpc Makedir (FileSystemMakedirRequest) returns (FileSystemResponse) {}
   // Removedir deletes the specified directory which must be empty
   rpc Removedir (FileSystemRemovedirRequest) returns (FileSystemResponse) {}
-  // Set lock
-  // rpc SetLock (FileSystemSetLockRequest) returns (FileSystemResponse) {}
-  // Release lock: Unlocks the specified file or directory
-  // rpc ReleaseLock (FileSystemReleaseLockRequest) returns (FileSystemResponse) {}
+  // Stat: gets attribute 
+  rpc Stat (FileSystemStatRequest) returns (FileSystemResponse) {}
+  // Readdir: Reading contents of a directory
+  rpc Readdir (FileSystemStatRequest) returns (FileSystemResponse) {}
 }
+
+
+
+// NOt to be done.
+// Set lock
+// rpc SetLock (FileSystemSetLockRequest) returns (FileSystemResponse) {}
+// Release lock: Unlocks the specified file or directory
+// rpc ReleaseLock (FileSystemReleaseLockRequest) returns (FileSystemResponse) {}
