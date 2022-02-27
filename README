@@ -1,1 +1,10 @@
 AFSv1 using libfuse and gRPC
+
+Running the server
+bazel run //server:server
+
+Running the client
+source run.sh
+
+The mountdir is mounted. Since no root dir is specified "/" is treated as the root directory.
+
