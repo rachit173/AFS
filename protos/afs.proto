@@ -51,6 +51,10 @@ message FileSystemReleaseLockRequest {
   string path = 1;
 }
 
+message FileSystemStatRequest {
+  string path = 1;
+}
+
 message FileSystemResponse {
   string status = 1;
   string data = 2;
