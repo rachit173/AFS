@@ -2,3 +2,4 @@ bazel-*/*
 fuse*
 */rootdir/*
 */mountdir/*
+mountdir/*

@@ -29,5 +29,9 @@ cc_binary(
     "FUSE_USE_VERSION=31"
  ],
  linkstatic = True,
- linkopts = ["-ldl", "-lpthread", "-lfuse"],
+ linkopts = [
+     "-ldl",
+     "-lpthread", 
+     "-L/usr/local/lib/x86_64-linux-gnu -lfuse3"
+    ],
 )

@@ -1,6 +1,10 @@
 // Hello filesystem class implementation
 #include <iostream>
 #include <string>
+#ifdef linux
+/* For pread()/pwrite()/utimensat() */
+#define _XOPEN_SOURCE 700
+#endif
 #define FUSE_USE_VERSION 31
 
 #include <fuse.h>
@@ -104,40 +108,88 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi,
 		       enum fuse_readdir_flags flags)
 {
-	// DIR *dp;
-	// struct dirent *de;
+	DIR *dp;
+	struct dirent *de;
 
-	// (void) offset;
-	// (void) fi;
-	// (void) flags;
+	(void) offset;
+	(void) fi;
+	(void) flags;
 
-	// dp = opendir(path);
-	// if (dp == NULL)
-	// 	return -errno;
+	dp = opendir(path);
+	if (dp == NULL)
+		return -errno;
 
-	// while ((de = readdir(dp)) != NULL) {
-	// 	struct stat st;
-	// 	memset(&st, 0, sizeof(st));
-	// 	st.st_ino = de->d_ino;
-	// 	st.st_mode = de->d_type << 12;
-	// 	if (filler(buf, de->d_name, &st, 0, fill_dir_plus))
-	// 		break;
-	// }
+	while ((de = readdir(dp)) != NULL) {
+		struct stat st;
+		memset(&st, 0, sizeof(st));
+		st.st_ino = de->d_ino;
+		st.st_mode = de->d_type << 12;
+		if (filler(buf, de->d_name, &st, 0, (fuse_fill_dir_flags)0))
+			break;
+	}
 
-	// closedir(dp);
+	closedir(dp);
 	return 0;
 }
 
-// static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
-// {
-// 	int res;
+static int mknod_wrapper(int dirfd, const char *path, const char *link,
+	int mode, dev_t rdev)
+{
+	int res;
 
-// 	res = mknod_wrapper(AT_FDCWD, path, NULL, mode, rdev);
-// 	if (res == -1)
-// 		return -errno;
+	if (S_ISREG(mode)) {
+		res = openat(dirfd, path, O_CREAT | O_EXCL | O_WRONLY, mode);
+		if (res >= 0)
+			res = close(res);
+	} else if (S_ISDIR(mode)) {
+		res = mkdirat(dirfd, path, mode);
+	} else if (S_ISLNK(mode) && link != NULL) {
+		res = symlinkat(link, dirfd, path);
+	} else if (S_ISFIFO(mode)) {
+		res = mkfifoat(dirfd, path, mode);
+#ifdef __FreeBSD__
+	} else if (S_ISSOCK(mode)) {
+		struct sockaddr_un su;
+		int fd;
 
-// 	return 0;
-// }
+		if (strlen(path) >= sizeof(su.sun_path)) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
+		fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd >= 0) {
+			/*
+			 * We must bind the socket to the underlying file
+			 * system to create the socket file, even though
+			 * we'll never listen on this socket.
+			 */
+			su.sun_family = AF_UNIX;
+			strncpy(su.sun_path, path, sizeof(su.sun_path));
+			res = bindat(dirfd, fd, (struct sockaddr*)&su,
+				sizeof(su));
+			if (res == 0)
+				close(fd);
+		} else {
+			res = -1;
+		}
+#endif
+	} else {
+		res = mknodat(dirfd, path, mode, rdev);
+	}
+
+	return res;
+}
+
+static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
+{
+	int res;
+
+	res = mknod_wrapper(AT_FDCWD, path, NULL, mode, rdev);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
 
 static int xmp_mkdir(const char *path, mode_t mode)
 {
@@ -351,6 +403,28 @@ static int xmp_fsync(const char *path, int isdatasync,
 	return 0;
 }
 
+static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file_info *fi)
+{
+	int fd;
+	off_t res;
+
+	if (fi == NULL)
+		fd = open(path, O_RDONLY);
+	else
+		fd = fi->fh;
+
+	if (fd == -1)
+		return -errno;
+
+	res = lseek(fd, off, whence);
+	if (res == -1)
+		res = -errno;
+
+	if (fi == NULL)
+		close(fd);
+	return res;
+}
+
 fuse_operations xmp_oper_new() {
   fuse_operations ops;
   ops.init = xmp_init;
@@ -358,7 +432,7 @@ fuse_operations xmp_oper_new() {
   ops.access = xmp_access;
   ops.readdir = xmp_readdir;
   // ops.readlink = xmp_readlink;
-  // ops.mknod = xmp_mknod;
+  ops.mknod = xmp_mknod;
   ops.mkdir = xmp_mkdir;
   ops.rmdir = xmp_rmdir;
   ops.rename = xmp_rename;
@@ -369,8 +443,10 @@ fuse_operations xmp_oper_new() {
   ops.create = xmp_create;
   ops.read = xmp_read;
   ops.write = xmp_write;
+  ops.statfs = xmp_statfs;
   ops.release = xmp_release;
   ops.fsync = xmp_fsync;
+  ops.lseek = xmp_lseek;
   return ops;
 }
 
@@ -428,11 +504,23 @@ static const struct fuse_opt option_spec[] = {
 	FUSE_OPT_END
 };
 
+struct State {
+  FILE* logfile;
+  std::string rootdir;
+};
+
 int main(int argc, char* argv[]) {
   if ((argc < 2)) {
     fprintf(stderr, "Usage: %s <mountpoint>\n", argv[0]);
     return 1;
   }
+  umask(0);
+  if ((getuid() == 0) || (geteuid() == 0)) {
+      fprintf(stderr, "Running BBFS as root opens unnacceptable security holes\n");
+      return 1;
+  }
+  auto data = new State();
+  data->rootdir = argv[1];
 
   // char buf[1024*1024];
   // struct fuse_file_info fi;
@@ -450,6 +538,7 @@ int main(int argc, char* argv[]) {
   std::string user("world");
   std::string reply = greeter.SayHello(user);
   std::cout << "Greeter received: " << reply << std::endl; 
-  return fuse_main(argc, argv, &xmp_oper, NULL); 
-  // ret = fuse_main(argc, argv, &hello_oper, NULL);
+  auto fuse_stat =  fuse_main(argc, argv, &xmp_oper, nullptr);
+  // fprintf(stdout, "fuse_main returned %d\n", fuse_stat);
+  return fuse_stat;
 }
