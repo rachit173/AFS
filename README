@@ -1,5 +1,7 @@
 AFSv1 using libfuse and gRPC
 
+For setup, run setup.sh
+
 Running the server
 bazel run //server:server
 
