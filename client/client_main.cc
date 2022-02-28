@@ -48,8 +48,29 @@ using afs::Greeter;
 using afs::HelloRequest;
 using afs::HelloReply;
 
+#define CACHE_DIR "/tmp/afs_prototype/"
+
+enum file_type{File, Directory};
+
 /**
- * Do stuff on mounting. 
+ * Make an rpc call to check if the cache for path is valid
+ * Return 0 if valid, else -1
+ */
+static int is_cache_valid(const char *path) {
+    // TODO
+    return -1;
+}
+
+/**
+ * Get the path of the cache for a given file/directory path
+ */
+static char *get_cache_name(const char *path, file_type type) {
+    // TODO
+    return NULL;
+}
+
+/**
+ * Do stuff on mounting. Initialize the cache directory if it doesn't exist 
  */
 static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 {
@@ -67,7 +88,23 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 	cfg->attr_timeout = 0;
 	cfg->negative_timeout = 0;
 
-	return NULL;
+    // initialize cache directory if not exist
+    DIR* dir = opendir(CACHE_DIR);
+
+    if (dir) {
+        closedir(dir);
+    } else if (ENOENT == errno) {
+        // cache_dir does not exist
+        if (-1 == mkdir(CACHE_DIR, 0700)) {
+            perror("Failed to initialize cache directory");
+            exit(EXIT_FAILURE);
+        } 
+    } else {
+        perror("Failed to initialize cache directory");
+        exit(EXIT_FAILURE);
+    }
+	
+    return NULL;
 }
 /**
  * Return the attribute of the file by calling the server. The attribute is stored in stbuf
@@ -267,7 +304,7 @@ static int afs_write(const char *path, const char *buf, size_t size,
 }
 
 /**
- * File flushed to server on flose is the cache has been modified. TODO
+ * File flushed to server on close is the cache has been modified. TODO
  */
 static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
@@ -275,20 +312,21 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
 }
 
 fuse_operations afs_oper_new() {
-  fuse_operations ops;
-  ops.init = afs_init; // initialization. Some behavior related to crash may happen here. Flush all the dirty cached files? 
-  ops.getattr = afs_getattr; // stat()
-  ops.readdir = afs_readdir; // read a directory
-  ops.unlink = afs_unlink; // remove a file/directory
-  ops.mkdir = afs_mkdir;
-  ops.rmdir = afs_rmdir;
-  ops.open = afs_open; // open an existing file, get from server or check if local copy is valid
-  ops.create = afs_create; // create a new cached file
-  ops.read = afs_read;// read a opened file
-  ops.write = afs_write; // write to an opened file
-  ops.flush = afs_flush; // called once for system call close(), flush change to server
-  ops.rename = afs_rename;
-  return ops;
+    fuse_operations ops;
+ 
+    ops.init = afs_init; 
+    ops.getattr = afs_getattr; // stat()
+    ops.readdir = afs_readdir; // read a directory
+    ops.unlink = afs_unlink; // remove a file/directory
+    ops.mkdir = afs_mkdir;
+    ops.rmdir = afs_rmdir;
+    ops.open = afs_open; // open an existing file, get from server or check if local copy is valid
+    ops.create = afs_create; // create a new cached file
+    ops.read = afs_read;// read a opened file
+    ops.write = afs_write; // write to an opened file
+    ops.flush = afs_flush; // called once for system call close(), flush change to server
+    ops.rename = afs_rename;
+    return ops;
 }
 
 static const fuse_operations afs_oper = afs_oper_new();
@@ -335,24 +373,24 @@ struct State {
 };
 
 int main(int argc, char* argv[]) {
-  if ((argc < 2)) {
-    fprintf(stderr, "Usage: %s <mountpoint>\n", argv[0]);
-    return 1;
-  }
-  umask(0);
-  if ((getuid() == 0) || (geteuid() == 0)) {
-      fprintf(stderr, "Running BBFS as root opens unnacceptable security holes\n");
-      return 1;
-  }
-  auto data = new State();
-  data->rootdir = argv[1];
+    if ((argc < 2)) {
+        fprintf(stderr, "Usage: %s <mountpoint>\n", argv[0]);
+        return 1;
+    }
+    umask(0);
+    if ((getuid() == 0) || (geteuid() == 0)) {
+        fprintf(stderr, "Running BBFS as root opens unnacceptable security holes\n");
+        return 1;
+    }
+    auto data = new State();
+    data->rootdir = argv[1];
 
-  std::string target_str = "localhost:50051";
-  GreeterClient greeter(
+    std::string target_str = "localhost:50051";
+    GreeterClient greeter(
       grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
-  std::string user("world");
-  std::string reply = greeter.SayHello(user);
-  std::cout << "Greeter received: " << reply << std::endl; 
-  auto fuse_stat =  fuse_main(argc, argv, &afs_oper, nullptr);
-  return fuse_stat;
+    std::string user("world");
+    std::string reply = greeter.SayHello(user);
+    std::cout << "Greeter received: " << reply << std::endl; 
+    auto fuse_stat =  fuse_main(argc, argv, &afs_oper, nullptr);
+    return fuse_stat;
 }
