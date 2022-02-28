@@ -216,12 +216,14 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
 }
 
 /*
- * Create an empty file on the server right away TODO
+ * Create an empty file and open it on the server right away TODO
  */
 static int afs_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
 	int res;
+
+	mode |= O_CREAT;
 
 	res = open(path, fi->flags, mode);
 	if (res == -1)
