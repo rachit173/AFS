@@ -6,7 +6,8 @@ Running the server
 bazel run //server:server
 
 Running the client
-source run.sh
+First set 'user_allow_other' in /usr/local/etc/fuse.conf
+Then run: source run.sh
 
 The mountdir is mounted. Since no root dir is specified "/" is treated as the root directory.
 
