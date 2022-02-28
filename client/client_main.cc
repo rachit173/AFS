@@ -1,4 +1,3 @@
-// Hello filesystem class implementation
 #include <iostream>
 #include <string>
 #ifdef linux
@@ -10,13 +9,12 @@
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
-
-// #include <config.h>
 
 #include <ctype.h>
 #include <libgen.h>
@@ -28,19 +26,21 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
+
 #ifdef __FreeBSD__
 #include <sys/socket.h>
 #include <sys/un.h>
 #endif
-#include <sys/time.h>
+
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
+
 #ifdef BAZEL_BUILD
-// #include "examples/protos/helloworld.grpc.pb.h"
 #else
 #include "protos/afs.grpc.pb.h"
 #endif
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -48,8 +48,10 @@ using afs::Greeter;
 using afs::HelloRequest;
 using afs::HelloReply;
 
-static off_t fill_dir_plus = 0;
-static void *xmp_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+/**
+ * Do stuff on mounting. 
+ */
+static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 {
 	(void) conn;
 	cfg->use_ino = 1;
@@ -67,8 +69,11 @@ static void *xmp_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 
 	return NULL;
 }
-
-static int xmp_getattr(const char *path, struct stat *stbuf,
+/**
+ * Return the attribute of the file by calling the server. The attribute is stored in stbuf
+ * Use te stat for the local cached file, not the server's TODO
+ */
+static int afs_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
 	(void) fi;
@@ -81,30 +86,11 @@ static int xmp_getattr(const char *path, struct stat *stbuf,
 	return 0;
 }
 
-static int xmp_access(const char *path, int mask)
-{
-	int res;
-
-	res = access(path, mask);
-	if (res == -1)
-		return -errno;
-
-	return 0;
-}
-
-static int xmp_readlink(const char *path, char *buf, size_t size)
-{
-	int res;
-
-	res = readlink(path, buf, size - 1);
-	if (res == -1)
-		return -errno;
-
-	buf[res] = '\0';
-	return 0;
-}
-
-static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
+/**
+ * Optional, display the content of a directory. TODO
+ * Maybe use a file .dir in each cahced diretory path to store the directory content?  
+ */
+static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi,
 		       enum fuse_readdir_flags flags)
 {
@@ -132,66 +118,10 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	return 0;
 }
 
-static int mknod_wrapper(int dirfd, const char *path, const char *link,
-	int mode, dev_t rdev)
-{
-	int res;
-
-	if (S_ISREG(mode)) {
-		res = openat(dirfd, path, O_CREAT | O_EXCL | O_WRONLY, mode);
-		if (res >= 0)
-			res = close(res);
-	} else if (S_ISDIR(mode)) {
-		res = mkdirat(dirfd, path, mode);
-	} else if (S_ISLNK(mode) && link != NULL) {
-		res = symlinkat(link, dirfd, path);
-	} else if (S_ISFIFO(mode)) {
-		res = mkfifoat(dirfd, path, mode);
-#ifdef __FreeBSD__
-	} else if (S_ISSOCK(mode)) {
-		struct sockaddr_un su;
-		int fd;
-
-		if (strlen(path) >= sizeof(su.sun_path)) {
-			errno = ENAMETOOLONG;
-			return -1;
-		}
-		fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd >= 0) {
-			/*
-			 * We must bind the socket to the underlying file
-			 * system to create the socket file, even though
-			 * we'll never listen on this socket.
-			 */
-			su.sun_family = AF_UNIX;
-			strncpy(su.sun_path, path, sizeof(su.sun_path));
-			res = bindat(dirfd, fd, (struct sockaddr*)&su,
-				sizeof(su));
-			if (res == 0)
-				close(fd);
-		} else {
-			res = -1;
-		}
-#endif
-	} else {
-		res = mknodat(dirfd, path, mode, rdev);
-	}
-
-	return res;
-}
-
-static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
-{
-	int res;
-
-	res = mknod_wrapper(AT_FDCWD, path, NULL, mode, rdev);
-	if (res == -1)
-		return -errno;
-
-	return 0;
-}
-
-static int xmp_mkdir(const char *path, mode_t mode)
+/*
+ * Call the server to make a directory. TODO
+ */
+static int afs_mkdir(const char *path, mode_t mode)
 {
 	int res;
 
@@ -202,7 +132,10 @@ static int xmp_mkdir(const char *path, mode_t mode)
 	return 0;
 }
 
-static int xmp_unlink(const char *path)
+/**
+ * Remove a file from both server and cache TODO
+ */
+static int afs_unlink(const char *path)
 {
 	int res;
 
@@ -213,7 +146,11 @@ static int xmp_unlink(const char *path)
 	return 0;
 }
 
-static int xmp_rmdir(const char *path)
+/**
+ * Simply redirect call to the server to remove a directory, and remove it from cache. TODO
+ * I think this should only succed if the directory is empty?
+ */
+static int afs_rmdir(const char *path)
 {
 	int res;
 
@@ -224,18 +161,10 @@ static int xmp_rmdir(const char *path)
 	return 0;
 }
 
-// static int xmp_symlink(const char *from, const char *to)
-// {
-// 	int res;
-
-// 	res = symlink(from, to);
-// 	if (res == -1)
-// 		return -errno;
-
-// 	return 0;
-// }
-
-static int xmp_rename(const char *from, const char *to, unsigned int flags)
+/**
+ * I believe this is an optional operation? set aside for now
+ */
+static int afs_rename(const char *from, const char *to, unsigned int flags)
 {
 	int res;
 
@@ -249,59 +178,10 @@ static int xmp_rename(const char *from, const char *to, unsigned int flags)
 	return 0;
 }
 
-// static int xmp_link(const char *from, const char *to)
-// {
-// 	int res;
-
-// 	res = link(from, to);
-// 	if (res == -1)
-// 		return -errno;
-
-// 	return 0;
-// }
-
-static int xmp_chmod(const char *path, mode_t mode,
-		     struct fuse_file_info *fi)
-{
-	(void) fi;
-	int res;
-
-	res = chmod(path, mode);
-	if (res == -1)
-		return -errno;
-
-	return 0;
-}
-
-static int xmp_chown(const char *path, uid_t uid, gid_t gid,
-		     struct fuse_file_info *fi)
-{
-	(void) fi;
-	int res;
-
-	res = lchown(path, uid, gid);
-	if (res == -1)
-		return -errno;
-
-	return 0;
-}
-
-static int xmp_truncate(const char *path, off_t size,
-			struct fuse_file_info *fi)
-{
-	int res;
-
-	if (fi != NULL)
-		res = ftruncate(fi->fh, size);
-	else
-		res = truncate(path, size);
-	if (res == -1)
-		return -errno;
-
-	return 0;
-}
-
-static int xmp_create(const char *path, mode_t mode,
+/*
+ * Create an empty file on the server right away TODO
+ */
+static int afs_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
 	int res;
@@ -314,7 +194,12 @@ static int xmp_create(const char *path, mode_t mode,
 	return 0;
 }
 
-static int xmp_open(const char *path, struct fuse_file_info *fi)
+/*
+ * Open a file. If has a valid local cache, use it. TODO
+ * Otherwise retrieve a copy from the server and store in local cache
+ * If file not exist, throw error 
+ */
+static int afs_open(const char *path, struct fuse_file_info *fi)
 {
 	int res;
 
@@ -326,7 +211,11 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
-static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
+/*
+ * Read from a file's cached copy. TODO
+ * If no cached copy exists this should get a copy from server.
+ */
+static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 	int fd;
@@ -349,7 +238,11 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	return res;
 }
 
-static int xmp_write(const char *path, const char *buf, size_t size,
+/*
+ * Write to the file's cached copy.
+ * If no cached copy exist it should retrieve a copy from the server. TODO
+ */
+static int afs_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
 	int fd;
@@ -373,84 +266,32 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	return res;
 }
 
-static int xmp_statfs(const char *path, struct statvfs *stbuf)
+/**
+ * File flushed to server on flose is the cache has been modified. TODO
+ */
+static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
-	int res;
-
-	res = statvfs(path, stbuf);
-	if (res == -1)
-		return -errno;
-
 	return 0;
 }
 
-static int xmp_release(const char *path, struct fuse_file_info *fi)
-{
-	(void) path;
-	close(fi->fh);
-	return 0;
-}
-
-static int xmp_fsync(const char *path, int isdatasync,
-		     struct fuse_file_info *fi)
-{
-	/* Just a stub.	 This method is optional and can safely be left
-	   unimplemented */
-
-	(void) path;
-	(void) isdatasync;
-	(void) fi;
-	return 0;
-}
-
-static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file_info *fi)
-{
-	int fd;
-	off_t res;
-
-	if (fi == NULL)
-		fd = open(path, O_RDONLY);
-	else
-		fd = fi->fh;
-
-	if (fd == -1)
-		return -errno;
-
-	res = lseek(fd, off, whence);
-	if (res == -1)
-		res = -errno;
-
-	if (fi == NULL)
-		close(fd);
-	return res;
-}
-
-fuse_operations xmp_oper_new() {
+fuse_operations afs_oper_new() {
   fuse_operations ops;
-  ops.init = xmp_init;
-  ops.getattr = xmp_getattr;
-  ops.access = xmp_access;
-  ops.readdir = xmp_readdir;
-  // ops.readlink = xmp_readlink;
-  ops.mknod = xmp_mknod;
-  ops.mkdir = xmp_mkdir;
-  ops.rmdir = xmp_rmdir;
-  ops.rename = xmp_rename;
-  ops.chmod = xmp_chmod;
-  ops.chown = xmp_chown;
-  ops.truncate = xmp_truncate;
-  ops.open = xmp_open;
-  ops.create = xmp_create;
-  ops.read = xmp_read;
-  ops.write = xmp_write;
-  ops.statfs = xmp_statfs;
-  ops.release = xmp_release;
-  ops.fsync = xmp_fsync;
-  ops.lseek = xmp_lseek;
+  ops.init = afs_init; // initialization. Some behavior related to crash may happen here. Flush all the dirty cached files? 
+  ops.getattr = afs_getattr; // stat()
+  ops.readdir = afs_readdir; // read a directory
+  ops.unlink = afs_unlink; // remove a file/directory
+  ops.mkdir = afs_mkdir;
+  ops.rmdir = afs_rmdir;
+  ops.open = afs_open; // open an existing file, get from server or check if local copy is valid
+  ops.create = afs_create; // create a new cached file
+  ops.read = afs_read;// read a opened file
+  ops.write = afs_write; // write to an opened file
+  ops.flush = afs_flush; // called once for system call close(), flush change to server
+  ops.rename = afs_rename;
   return ops;
 }
 
-static const fuse_operations xmp_oper = xmp_oper_new();
+static const fuse_operations afs_oper = afs_oper_new();
 
 class GreeterClient {
  public:
@@ -488,22 +329,6 @@ class GreeterClient {
   std::unique_ptr<Greeter::Stub> stub_;
 };
 
-static struct options {
-	const char *filename;
-	const char *contents;
-	int show_help;
-} options;
-
-#define OPTION(t, p)                           \
-    { t, offsetof(struct options, p), 1 }
-static const struct fuse_opt option_spec[] = {
-	OPTION("--name=%s", filename),
-	OPTION("--contents=%s", contents),
-	OPTION("-h", show_help),
-	OPTION("--help", show_help),
-	FUSE_OPT_END
-};
-
 struct State {
   FILE* logfile;
   std::string rootdir;
@@ -522,23 +347,12 @@ int main(int argc, char* argv[]) {
   auto data = new State();
   data->rootdir = argv[1];
 
-  // char buf[1024*1024];
-  // struct fuse_file_info fi;
-  // fi.flags = O_RDONLY;
-  // HelloFS::open(hello_path.c_str(), &fi);
-  // int output = HelloFS::read(hello_path.c_str(), buf, 1024*1024, 0, &fi);
-  // cout << "read output: " << output << endl;
-  int ret;
- 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv); 
-  struct fuse_operations hello_oper = {
-  };
   std::string target_str = "localhost:50051";
   GreeterClient greeter(
       grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
   std::string user("world");
   std::string reply = greeter.SayHello(user);
   std::cout << "Greeter received: " << reply << std::endl; 
-  auto fuse_stat =  fuse_main(argc, argv, &xmp_oper, nullptr);
-  // fprintf(stdout, "fuse_main returned %d\n", fuse_stat);
+  auto fuse_stat =  fuse_main(argc, argv, &afs_oper, nullptr);
   return fuse_stat;
 }
