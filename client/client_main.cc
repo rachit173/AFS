@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
+#include <stdint.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
@@ -48,25 +50,128 @@ using afs::Greeter;
 using afs::HelloRequest;
 using afs::HelloReply;
 
-#define CACHE_DIR "/tmp/afs_prototype/"
-
+using afs::FileSystem;
+using afs::FileSystemStatResponse;
+using afs::FileSystemStatRequest;
+#define CACHE_DIR "/tmp/afs_prototype"
 enum file_type{File, Directory};
+std::shared_ptr<Channel> channel;
 
-/**
- * Make an rpc call to check if the cache for path is valid
- * Return 0 if valid, else -1
- */
-static int is_cache_valid(const char *path) {
-    // TODO
-    return -1;
-}
+class FileSystemClient {
+    public:
+        FileSystemClient(std::shared_ptr<Channel> channel)
+            : stub_(FileSystem::NewStub(channel)) {}
+
+        int getStat(const char *path, struct stat *st) {
+            FileSystemStatRequest request;
+            request.set_path(path); 
+            FileSystemStatResponse reply;
+            ClientContext context;
+            Status status = stub_->Stat(&context, request, &reply);
+        
+            // TODO handle server response.
+            if (status.ok()) {
+                std::timespec atime, mtime;
+                atime.tv_sec = reply.lastaccess().sec();
+                atime.tv_nsec = reply.lastaccess().nsec();
+                mtime.tv_sec = reply.lastmodification().sec();
+                mtime.tv_nsec = reply.lastmodification().nsec();
+                
+                st->st_uid = reply.uid();
+                st->st_gid = reply.gid(); // group of the file
+                st->st_atim = atime; // last access time
+                st->st_mtim = mtime; // last modification time
+                st->st_size = reply.size();
+                if (reply.isdir()) {
+                    st->st_mode = S_IFDIR | 0777;// specify the file as directroy and set permission bit
+                } else {// a file
+                    st->st_mode = S_IFREG | 0777;// specify the file as normal file and set permission bit
+                }
+                // reply. 
+                return 0;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                        << std::endl;
+                return -1;
+            }
+        }
+
+    private:
+        std::unique_ptr<FileSystem::Stub> stub_;
+};
+
+class GreeterClient {
+ public:
+  GreeterClient(std::shared_ptr<Channel> channel)
+      : stub_(Greeter::NewStub(channel)) {}
+
+  // Assembles the client's payload, sends it and presents the response back
+  // from the server.
+  std::string SayHello(const std::string& user) {
+    // Data we are sending to the server.
+    HelloRequest request;
+    request.set_name(user);
+
+    // Container for the data we expect from the server.
+    HelloReply reply;
+
+    // Context for the client. It could be used to convey extra information to
+    // the server and/or tweak certain RPC behaviors.
+    ClientContext context;
+
+    // The actual RPC.
+    Status status = stub_->SayHello(&context, request, &reply);
+
+    // Act upon its status.
+    if (status.ok()) {
+      return reply.message();
+    } else {
+      std::cout << status.error_code() << ": " << status.error_message()
+                << std::endl;
+      return "RPC failed";
+    }
+  }
+
+ private:
+  std::unique_ptr<Greeter::Stub> stub_;
+};
 
 /**
  * Get the path of the cache for a given file/directory path
+ * The caller needs to free the memory for the return
  */
-static char *get_cache_name(const char *path, file_type type) {
-    // TODO
-    return NULL;
+static char *get_cache_name(const char *path, enum file_type type) {
+    int path_length = strlen(path);
+    int dir_length = strlen(CACHE_DIR);
+    
+    char *cache_name = (char*)calloc(path_length + dir_length, sizeof(char));
+    strcat(cache_name, CACHE_DIR);
+    strcat(cache_name, path);
+    return cache_name;
+}
+
+/**
+ * Make an rpc call to check if the cache for path is valid
+ * Return 1 if valid, 0 for invalid, negative for errors
+ */
+static int is_cache_valid(const char *path) {
+    struct stat st_server_file = {};
+    struct stat st_cached = {};
+    FileSystemClient client(channel);
+    if (-1 == client.getStat(path, &st_server_file)){
+		return -errno;
+    }
+    char *cached_file = get_cache_name(path, File);
+    if (-1 == lstat(cached_file, &st_cached)) {
+        free(cached_file); 
+		return -errno;
+    }
+    free(cached_file); 
+    // compare the last modified time
+    if (st_server_file.st_atime <= st_cached.st_atime) {
+        return 1;    
+    }
+    return 0;
 }
 
 /**
@@ -131,7 +236,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi,
 		       enum fuse_readdir_flags flags)
 {
-	DIR *dp;
+/*	DIR *dp;
 	struct dirent *de;
 
 	(void) offset;
@@ -152,7 +257,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	}
 
 	closedir(dp);
-	return 0;
+*/	return 0;
 }
 
 /*
@@ -278,7 +383,7 @@ static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 }
 
 /*
- * Write to the file's cached copy.
+ * Write to the temporary file of the cached copy.
  * If no cached copy exist it should retrieve a copy from the server. TODO
  */
 static int afs_write(const char *path, const char *buf, size_t size,
@@ -333,42 +438,6 @@ fuse_operations afs_oper_new() {
 
 static const fuse_operations afs_oper = afs_oper_new();
 
-class GreeterClient {
- public:
-  GreeterClient(std::shared_ptr<Channel> channel)
-      : stub_(Greeter::NewStub(channel)) {}
-
-  // Assembles the client's payload, sends it and presents the response back
-  // from the server.
-  std::string SayHello(const std::string& user) {
-    // Data we are sending to the server.
-    HelloRequest request;
-    request.set_name(user);
-
-    // Container for the data we expect from the server.
-    HelloReply reply;
-
-    // Context for the client. It could be used to convey extra information to
-    // the server and/or tweak certain RPC behaviors.
-    ClientContext context;
-
-    // The actual RPC.
-    Status status = stub_->SayHello(&context, request, &reply);
-
-    // Act upon its status.
-    if (status.ok()) {
-      return reply.message();
-    } else {
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl;
-      return "RPC failed";
-    }
-  }
-
- private:
-  std::unique_ptr<Greeter::Stub> stub_;
-};
-
 struct State {
   FILE* logfile;
   std::string rootdir;
@@ -388,8 +457,9 @@ int main(int argc, char* argv[]) {
     data->rootdir = argv[1];
 
     std::string target_str = "localhost:50051";
-    GreeterClient greeter(
-      grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
+    channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
+    GreeterClient greeter(channel);
+    
     std::string user("world");
     std::string reply = greeter.SayHello(user);
     std::cout << "Greeter received: " << reply << std::endl; 
