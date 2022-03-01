@@ -61,13 +61,14 @@ message FileSystemStatRequest {
 }
 
 message FileSystemStatResponse {
-  int32 uid = 1;
-  int32 gid = 2;
-  uint64 size = 3;
-  bool isDir = 4;
-  TimeSpec lastAccess = 5;
-  TimeSpec lastModification = 6;
-  TimeSpec lastStatusChange = 7;
+  int32 status = 1;
+  int32 uid = 2;
+  int32 gid = 3;
+  uint64 size = 4;
+  bool isDir = 5;
+  TimeSpec lastAccess = 6;
+  TimeSpec lastModification = 7;
+  TimeSpec lastStatusChange = 8;
 }
 
 message FileSystemResponse {
