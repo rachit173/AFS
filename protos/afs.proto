@@ -19,6 +19,11 @@ message HelloReply {
   string message = 1;
 }
 
+message TimeSpec {
+  uint64 sec = 1;
+  uint64 nsec = 2;
+}
+
 message FileSystemRequest {
   string path = 1;
 }
@@ -55,6 +60,16 @@ message FileSystemStatRequest {
   string path = 1;
 }
 
+message FileSystemStatResponse {
+  int32 uid = 1;
+  int32 gid = 2;
+  uint64 size = 3;
+  bool isDir = 4;
+  TimeSpec lastAccess = 5;
+  TimeSpec lastModification = 6;
+  TimeSpec lastStatusChange = 7;
+}
+
 message FileSystemResponse {
   string status = 1;
   string data = 2;
@@ -76,7 +91,7 @@ service FileSystem {
   // Removedir deletes the specified directory which must be empty
   rpc Removedir (FileSystemRemovedirRequest) returns (FileSystemResponse) {}
   // Stat: gets attribute 
-  rpc Stat (FileSystemStatRequest) returns (FileSystemResponse) {}
+  rpc Stat (FileSystemStatRequest) returns (FileSystemStatResponse) {}
   // Readdir: Reading contents of a directory
   rpc Readdir (FileSystemStatRequest) returns (FileSystemResponse) {}
 }
