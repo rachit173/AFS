@@ -3,6 +3,10 @@
 #include <memory>
 #include <string>
 
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
@@ -20,6 +24,10 @@ using grpc::Status;
 using afs::Greeter;
 using afs::HelloRequest;
 using afs::HelloReply;
+using afs::FileSystem;
+using afs::FileSystemMakedirRequest;
+using afs::FileSystemRemovedirRequest;
+using afs::FileSystemResponse;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -27,6 +35,37 @@ class GreeterServiceImpl final : public Greeter::Service {
                   HelloReply* reply) override {
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
+    return Status::OK;
+  }
+};
+
+class FileSystemImpl final : public FileSystem::Service {
+  Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
+                  FileSystemResponse *reply) override {
+    int ret = mkdir(request->path().c_str(), 0777);
+
+    //Mkdir return -1 on error and sets errno to error code
+    if (ret == -1) {
+      ret = errno;
+    }
+    reply->set_status(ret);
+    reply->set_data("");
+
+    return Status::OK;
+  }
+
+  Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
+                  FileSystemResponse *reply) override {
+    int ret = rmdir(request->path().c_str());
+
+    //rmdir returns -1 on error and sets errno
+    if (ret == -1) {
+      ret = errno;
+    }
+
+    reply->set_status(ret);
+    reply->set_data("");
+
     return Status::OK;
   }
 };
