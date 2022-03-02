@@ -3,6 +3,11 @@
 #include <memory>
 #include <string>
 
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
@@ -20,6 +25,13 @@ using grpc::Status;
 using afs::Greeter;
 using afs::HelloRequest;
 using afs::HelloReply;
+using afs::FileSystem;
+using afs::FileSystemMakedirRequest;
+using afs::FileSystemRemovedirRequest;
+using afs::FileSystemStatRequest;
+using afs::FileSystemStatResponse;
+using afs::FileSystemResponse;
+using afs::TimeSpec;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -27,6 +39,69 @@ class GreeterServiceImpl final : public Greeter::Service {
                   HelloReply* reply) override {
     std::string prefix("Hello ");
     reply->set_message(prefix + request->name());
+    return Status::OK;
+  }
+};
+
+class FileSystemImpl final : public FileSystem::Service {
+  Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
+                  FileSystemResponse *reply) override {
+    int ret = mkdir(request->path().c_str(), 0777);
+
+    //Mkdir return -1 on error and sets errno to error code
+    if (ret == -1) {
+      ret = errno;
+    }
+    reply->set_status(ret);
+    reply->set_data("");
+
+    return Status::OK;
+  }
+
+  Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
+                  FileSystemResponse *reply) override {
+    int ret = rmdir(request->path().c_str());
+
+    //rmdir returns -1 on error and sets errno
+    if (ret == -1) {
+      ret = errno;
+    }
+
+    reply->set_status(ret);
+    reply->set_data("");
+
+    return Status::OK;
+  }
+
+  Status Stat(ServerContext* context, const FileSystemStatRequest *request,
+                  FileSystemStatResponse *reply) override {
+    TimeSpec *lastAccess;
+    TimeSpec *lastModification;
+    TimeSpec *lastStatusChange;
+    struct stat buf;
+    int ret = stat(request->path().c_str(), &buf);
+
+    // returns -1 on error and sets errno
+    if (ret == -1) {
+      ret = errno;
+    }
+
+    reply->set_status(ret);
+    reply->set_uid(buf.st_uid);
+    reply->set_gid(buf.st_gid);
+    reply->set_size(buf.st_size);
+    reply->set_isdir(S_ISDIR(buf.st_mode));
+
+    lastAccess = reply->mutable_lastaccess();
+    lastModification = reply->mutable_lastmodification();
+    lastStatusChange = reply->mutable_laststatuschange();
+    lastAccess->set_sec(buf.st_atim.tv_sec);
+    lastAccess->set_nsec(buf.st_atim.tv_nsec);
+    lastModification->set_sec(buf.st_mtim.tv_sec);
+    lastModification->set_nsec(buf.st_mtim.tv_nsec);
+    lastStatusChange->set_sec(buf.st_ctim.tv_sec);
+    lastStatusChange->set_nsec(buf.st_ctim.tv_nsec);
+
     return Status::OK;
   }
 };
