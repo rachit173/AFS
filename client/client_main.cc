@@ -56,15 +56,14 @@ using afs::FileSystemStatResponse;
 using afs::FileSystemStatRequest;
 using afs::FileSystemReaddirRequest;
 using afs::FileSystemReaddirResponse;
-using afs::FileSystemDirStruct;
 
 #define CACHE_DIR "/tmp/afs_prototype"
 enum file_type{File, Directory};
-std::shared_ptr<Channel> channel;
+static std::shared_ptr<Channel> channel;
 
-struct dir_entry {
-    char name[100];
-    struct stat st;
+struct dir_structure {
+    char **files;
+    int length;
 };
 
 class FileSystemClient {
@@ -93,26 +92,29 @@ class FileSystemClient {
         /**
          * Read directory content. Return null if error occurs
          */
-         struct dir_entry *readDir(const char *path) {
+         struct dir_structure *readDir(const char *path) {
             FileSystemReaddirRequest request;
             request.set_path(path); 
             FileSystemReaddirResponse reply;
             ClientContext context;
-            struct dir_entry *entry_list =
-                (struct dir_entry *)calloc(reply.files_size(), sizeof(struct dir_entry));
+            struct dir_structure *dir = (struct dir_structure *) calloc(1, sizeof(struct dir_structure));
+            char **file_list =
+                (char **)calloc(reply.filename_size(), sizeof(char *));
 
             Status status = stub_->Readdir(&context, request, &reply);
 
             // handle server response.
             if (status.ok()) {
-                for (int i = 0; i < reply.files_size(); i++) {
-                    // get file structure from the grpc message
-                    FileSystemDirStruct f = reply.files(i);
-                    strncpy(entry_list[i].name, f.filename().c_str(), sizeof(entry_list[i].name));
-                    struct stat *f_stat = &(entry_list[i].st);
-                    populateStatStruct(f.stat(), f_stat);
+
+                for (int i = 0; i < reply.filename_size(); i++) {
+                    const char *fileName = reply.filename(i).c_str();
+                    file_list[i] = (char *)calloc(1, strlen(fileName) + 1);
+                    strncpy(file_list[i], fileName, strlen(fileName));
+                    file_list[i][strlen(fileName)] = '\0';
                 }
-                return entry_list;
+                dir->files = file_list;
+                dir->length = reply.filename_size();
+                return dir;
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                     << std::endl;
@@ -262,43 +264,43 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
  * Return the attribute of the file by calling the server. The attribute is stored in stbuf
  * Use te stat for the local cached file, not the server's TODO
  */
-static int afs_getattr(const char *path, struct stat *stbuf,
+static int afs_getattr(const char *path, struct stat *st,
 		       struct fuse_file_info *fi)
 {
-	(void) fi;
-	int res;
+    // mock so readdir work for now TODO
+    st->st_uid = getuid(); // owner of the file
+    st->st_gid = getgid(); // group of the file
+    st->st_atime = time( NULL ); // last access time
+    st->st_mtime = time( NULL ); // last modification time
 
-	res = lstat(path, stbuf);
-	if (res == -1)
-		return -errno;
+    if (strcmp( path, "/" ) == 0 ) {
+        st->st_mode = S_IFDIR | 0755;// specify the file as directroy and set permission bit
+        st->st_nlink = 2;
+    }
 
-	return 0;
+    return 0;
 }
 
 /**
  * Optional, display the content of a directory. TODO 
  */
 static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi,
-		       enum fuse_readdir_flags flags)
+		       off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
 {
     FileSystemClient client(channel);
-    struct dir_entry *dir_entries = client.readDir(path);
+    struct dir_structure *dir_entries = client.readDir(path);
     if (NULL == dir_entries){
 		return -errno;
     }
 
-    long unsigned int entries_size = 
-        sizeof(*dir_entries)/sizeof(dir_entries[0]);
-    for (long unsigned int i = 0; i < entries_size; i++) {
+    char **file_names = dir_entries->files;
+    for (int i = 0; i < dir_entries->length; i++) {
+        char * entry = file_names[i];
         // fill in the directory
-        if (filler(
-            buf, dir_entries->name, &(dir_entries->st), 
-            0, (fuse_fill_dir_flags)0) == 0) {
-            break;
-        }
-
+        filler(buf, entry, NULL, 0, (fuse_fill_dir_flags)0);
+        free(entry);
     }
+    free(file_names);
     free(dir_entries);
     return 0;
 }
