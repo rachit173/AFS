@@ -51,11 +51,21 @@ using afs::HelloRequest;
 using afs::HelloReply;
 
 using afs::FileSystem;
+using afs::FileSystemResponse;
 using afs::FileSystemStatResponse;
 using afs::FileSystemStatRequest;
+using afs::FileSystemReaddirRequest;
+using afs::FileSystemReaddirResponse;
+using afs::FileSystemDirStruct;
+
 #define CACHE_DIR "/tmp/afs_prototype"
 enum file_type{File, Directory};
 std::shared_ptr<Channel> channel;
+
+struct dir_entry {
+    char name[100];
+    struct stat st;
+};
 
 class FileSystemClient {
     public:
@@ -69,25 +79,9 @@ class FileSystemClient {
             ClientContext context;
             Status status = stub_->Stat(&context, request, &reply);
         
-            // TODO handle server response.
             if (status.ok()) {
-                std::timespec atime, mtime;
-                atime.tv_sec = reply.lastaccess().sec();
-                atime.tv_nsec = reply.lastaccess().nsec();
-                mtime.tv_sec = reply.lastmodification().sec();
-                mtime.tv_nsec = reply.lastmodification().nsec();
-                
-                st->st_uid = reply.uid();
-                st->st_gid = reply.gid(); // group of the file
-                st->st_atim = atime; // last access time
-                st->st_mtim = mtime; // last modification time
-                st->st_size = reply.size();
-                if (reply.isdir()) {
-                    st->st_mode = S_IFDIR | 0777;// specify the file as directroy and set permission bit
-                } else {// a file
-                    st->st_mode = S_IFREG | 0777;// specify the file as normal file and set permission bit
-                }
-                // reply. 
+                populateStatStruct(reply, st);
+                // reply
                 return 0;
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
@@ -96,8 +90,58 @@ class FileSystemClient {
             }
         }
 
+        /**
+         * Read directory content. Return null if error occurs
+         */
+         struct dir_entry *readDir(const char *path) {
+            FileSystemReaddirRequest request;
+            request.set_path(path); 
+            FileSystemReaddirResponse reply;
+            ClientContext context;
+            struct dir_entry *entry_list =
+                (struct dir_entry *)calloc(reply.files_size(), sizeof(struct dir_entry));
+
+            Status status = stub_->Readdir(&context, request, &reply);
+
+            // handle server response.
+            if (status.ok()) {
+                for (int i = 0; i < reply.files_size(); i++) {
+                    // get file structure from the grpc message
+                    FileSystemDirStruct f = reply.files(i);
+                    strncpy(entry_list[i].name, f.filename().c_str(), sizeof(entry_list[i].name));
+                    struct stat *f_stat = &(entry_list[i].st);
+                    populateStatStruct(f.stat(), f_stat);
+                }
+                return entry_list;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                    << std::endl;
+                return NULL;
+            }
+        }
+
     private:
         std::unique_ptr<FileSystem::Stub> stub_;
+        void populateStatStruct(FileSystemStatResponse reply, struct stat *st) {
+            std::timespec atime, mtime;
+            atime.tv_sec = reply.lastaccess().sec();
+            atime.tv_nsec = reply.lastaccess().nsec();
+            mtime.tv_sec = reply.lastmodification().sec();
+            mtime.tv_nsec = reply.lastmodification().nsec();
+            
+            st->st_uid = reply.uid();
+            st->st_gid = reply.gid(); // group of the file
+            st->st_atim = atime; // last access time
+            st->st_mtim = mtime; // last modification time
+            st->st_size = reply.size();
+            if (reply.isdir()) {
+                // specify the file as directroy and set permission bit
+                st->st_mode = S_IFDIR | 0777;
+            } else {// a file
+                // specify the file as normal file and set permission bit
+                st->st_mode = S_IFREG | 0777;
+            }
+        }
 };
 
 class GreeterClient {
@@ -161,12 +205,14 @@ static int is_cache_valid(const char *path) {
     if (-1 == client.getStat(path, &st_server_file)){
 		return -errno;
     }
+
     char *cached_file = get_cache_name(path, File);
     if (-1 == lstat(cached_file, &st_cached)) {
         free(cached_file); 
 		return -errno;
     }
     free(cached_file); 
+
     // compare the last modified time
     if (st_server_file.st_atime <= st_cached.st_atime) {
         return 1;    
@@ -175,7 +221,8 @@ static int is_cache_valid(const char *path) {
 }
 
 /**
- * Do stuff on mounting. Initialize the cache directory if it doesn't exist 
+ * Do stuff on mounting.
+ * Initialize the cache directory if it doesn't exist 
  */
 static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 {
@@ -229,35 +276,31 @@ static int afs_getattr(const char *path, struct stat *stbuf,
 }
 
 /**
- * Optional, display the content of a directory. TODO
- * Maybe use a file .dir in each cahced diretory path to store the directory content?  
+ * Optional, display the content of a directory. TODO 
  */
 static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi,
 		       enum fuse_readdir_flags flags)
 {
-/*	DIR *dp;
-	struct dirent *de;
-
-	(void) offset;
-	(void) fi;
-	(void) flags;
-
-	dp = opendir(path);
-	if (dp == NULL)
+    FileSystemClient client(channel);
+    struct dir_entry *dir_entries = client.readDir(path);
+    if (NULL == dir_entries){
 		return -errno;
+    }
 
-	while ((de = readdir(dp)) != NULL) {
-		struct stat st;
-		memset(&st, 0, sizeof(st));
-		st.st_ino = de->d_ino;
-		st.st_mode = de->d_type << 12;
-		if (filler(buf, de->d_name, &st, 0, (fuse_fill_dir_flags)0))
-			break;
-	}
+    long unsigned int entries_size = 
+        sizeof(*dir_entries)/sizeof(dir_entries[0]);
+    for (long unsigned int i = 0; i < entries_size; i++) {
+        // fill in the directory
+        if (filler(
+            buf, dir_entries->name, &(dir_entries->st), 
+            0, (fuse_fill_dir_flags)0) == 0) {
+            break;
+        }
 
-	closedir(dp);
-*/	return 0;
+    }
+    free(dir_entries);
+    return 0;
 }
 
 /*
