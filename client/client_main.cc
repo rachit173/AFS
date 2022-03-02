@@ -268,9 +268,17 @@ static int afs_getattr(const char *path, struct stat *stbuf,
 	(void) fi;
 	int res;
 
-	res = lstat(path, stbuf);
-	if (res == -1)
-		return -errno;
+	// check valid for cache copy
+	int valid = is_cache_valid(path);
+
+	if (valid) {
+		std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+		res = lstat(cachePath.c_str(), stbuf);
+		if (res == -1)
+			return -errno;
+	} else {
+		// TODO: getattr from server
+	}
 
 	return 0;
 }
@@ -324,9 +332,13 @@ static int afs_unlink(const char *path)
 {
 	int res;
 
-	res = unlink(path);
+	// unlink cache copy
+	std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+	res = unlink(cachePath.c_str());
 	if (res == -1)
 		return -errno;
+
+	// TODO: unlink server file
 
 	return 0;
 }
@@ -356,9 +368,14 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
 	if (flags)
 		return -EINVAL;
 
-	res = rename(from, to);
+	// rename cache copy
+	std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
+	std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
+	res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
 	if (res == -1)
 		return -errno;
+
+	// TODO: rename server copy
 
 	return 0;
 }
@@ -373,11 +390,16 @@ static int afs_create(const char *path, mode_t mode,
 
 	mode |= O_CREAT;
 
-	res = open(path, fi->flags, mode);
+	// create cache copy
+	std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+	res = open(cachePath.c_str(), fi->flags, mode);
 	if (res == -1)
 		return -errno;
 
 	fi->fh = res;
+
+	// TODO: create server file
+	
 	return 0;
 }
 
