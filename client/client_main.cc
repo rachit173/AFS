@@ -79,9 +79,13 @@ class FileSystemClient {
             Status status = stub_->Stat(&context, request, &reply);
         
             if (status.ok()) {
-                populateStatStruct(reply, st);
-                // reply
-                return 0;
+                if (reply.status() == 0){
+                    populateStatStruct(reply, st);
+                    // reply
+                    return 0;
+                } else {
+                    return -1;
+                }
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                         << std::endl;
@@ -190,7 +194,7 @@ static char *get_cache_name(const char *path, enum file_type type) {
     int path_length = strlen(path);
     int dir_length = strlen(CACHE_DIR);
     
-    char *cache_name = (char*)calloc(path_length + dir_length, sizeof(char));
+    char *cache_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
     strcat(cache_name, CACHE_DIR);
     strcat(cache_name, path);
     return cache_name;
@@ -261,23 +265,27 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
     return NULL;
 }
 /**
- * Return the attribute of the file by calling the server. The attribute is stored in stbuf
- * Use te stat for the local cached file, not the server's TODO
+ * Return the attribute of the file by calling the server
+ * The attribute is stored in stbuf
  */
 static int afs_getattr(const char *path, struct stat *st,
 		       struct fuse_file_info *fi)
 {
-    // mock so readdir work for now TODO
+    // TODO
+    // mock so readdir work for now
     st->st_uid = getuid(); // owner of the file
     st->st_gid = getgid(); // group of the file
     st->st_atime = time( NULL ); // last access time
     st->st_mtime = time( NULL ); // last modification time
 
-    if (strcmp( path, "/" ) == 0 ) {
-        st->st_mode = S_IFDIR | 0755;// specify the file as directroy and set permission bit
+    if (strcmp( path, "/" ) == 0 || strcmp( path, "/test_directory" ) == 0 ) {
+        st->st_mode = S_IFDIR | 0777;// specify the file as directroy and set permission bit
         st->st_nlink = 2;
+    } else if (strcmp( path, "/test_file" ) == 0) {
+        st->st_mode = S_IFREG | 0777;// specify the file as normal file and set permission bit
+        st->st_nlink = 1;
+        st->st_size = 1024;
     }
-
     return 0;
 }
 
@@ -388,11 +396,43 @@ static int afs_create(const char *path, mode_t mode,
  * Otherwise retrieve a copy from the server and store in local cache
  * If file not exist, throw error 
  */
-static int afs_open(const char *path, struct fuse_file_info *fi)
-{
-	int res;
+static int afs_open(const char *path, struct fuse_file_info *fi) {
+    printf("============open file %s\n", path);
+    // check if a cache exist
+    int get_new_file = 1;
+    char *cache_name = get_cache_name(path, File);
+    if(access(cache_name, F_OK ) == 0) {
+        // file exists
+        int ret = is_cache_valid(path);
+        if (1 == ret) {
+            get_new_file = 0;
+        } else if (0 > ret) {
+            // TODO Need to deal with the case when the file does not exist on server
+            // remove the cached file and return error
+            // mock don't get new file for now
+            get_new_file = 0;
+        }
+    }
 
-	res = open(path, fi->flags);
+    if (get_new_file == 1) {
+        // retrive a new copy from server, and replcae the cached file TODO
+        // flags should also be passed to the server
+        // If there is any error the errono should be returned
+        if (strcmp( path, "/test_file" ) == 0) {
+            printf("============file %s is retrived from the server\n", path);
+            char str[] = "haha this is a new file from server\n";
+            FILE * f = fopen(cache_name, "w");
+            for (int i = 0; str[i] != '\n'; i++) {
+                /* write to file using fputc() function */
+                fputc(str[i], f);
+            }
+            fclose(f);
+        }
+    }
+    
+	int res;
+	res = open(cache_name, fi->flags);
+    free(cache_name);
 	if (res == -1)
 		return -errno;
 
@@ -401,19 +441,20 @@ static int afs_open(const char *path, struct fuse_file_info *fi)
 }
 
 /*
- * Read from a file's cached copy. TODO
- * If no cached copy exists this should get a copy from server.
+ * Read from a file's cached copy
  */
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 	int fd;
 	int res;
+    char *cache_name = get_cache_name(path, File);
 
 	if(fi == NULL)
-		fd = open(path, O_RDONLY);
+		fd = open(cache_name, O_RDONLY);
 	else
 		fd = fi->fh;
+    free(cache_name);
 	
 	if (fd == -1)
 		return -errno;
@@ -436,13 +477,15 @@ static int afs_write(const char *path, const char *buf, size_t size,
 {
 	int fd;
 	int res;
+    char *cache_name = get_cache_name(path, File);
 
 	(void) fi;
 	if(fi == NULL)
-		fd = open(path, O_WRONLY);
+		fd = open(cache_name, O_WRONLY);
 	else
 		fd = fi->fh;
-	
+    free(cache_name);
+
 	if (fd == -1)
 		return -errno;
 
