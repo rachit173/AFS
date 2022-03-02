@@ -260,25 +260,17 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 }
 /**
  * Return the attribute of the file by calling the server. The attribute is stored in stbuf
- * Use te stat for the local cached file, not the server's TODO
  */
 static int afs_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
 	(void) fi;
-	int res;
 
-	// check valid for cache copy
-	int valid = is_cache_valid(path);
-
-	if (valid) {
-		std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-		res = lstat(cachePath.c_str(), stbuf);
-		if (res == -1)
-			return -errno;
-	} else {
-		// TODO: getattr from server
-	}
+	// we have to call the server anyway, because checking valid also involves a server call of getStat()
+	FileSystemClient client(channel);
+	if (-1 == client.getStat(path, stbuf)){
+		return -errno;
+    	}
 
 	return 0;
 }
