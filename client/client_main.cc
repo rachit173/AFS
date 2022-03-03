@@ -265,8 +265,7 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
     return NULL;
 }
 /**
- * Return the attribute of the file by calling the server if there is no local cache
- * Otherwise use the stat for the local cache TODO
+ * Return the attribute of the file by calling the server
  * The attribute is stored in stbuf
  */
 static int afs_getattr(const char *path, struct stat *st,
@@ -281,10 +280,8 @@ static int afs_getattr(const char *path, struct stat *st,
 
     if (strcmp( path, "/" ) == 0 || strcmp( path, "/test_directory" ) == 0 ) {
         st->st_mode = S_IFDIR | 0777;// specify the file as directroy and set permission bit
-        st->st_nlink = 2;
     } else if (strcmp( path, "/test_file" ) == 0) {
         st->st_mode = S_IFREG | 0777;// specify the file as normal file and set permission bit
-        st->st_nlink = 1;
         st->st_size = 1024;
     }
     return 0;
