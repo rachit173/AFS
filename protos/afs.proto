@@ -37,7 +37,8 @@ message FileSystemCreateRequest {
 }
 
 message FileSystemRenameRequest {
-  string path = 1;
+  string fromPath = 1;
+  string toPath = 2;
 }
 
 message FileSystemMakedirRequest {
