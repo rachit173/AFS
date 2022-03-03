@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -34,6 +35,7 @@ using afs::FileSystemResponse;
 using afs::TimeSpec;
 using afs::FileSystemReaddirRequest;
 using afs::FileSystemReaddirResponse;
+
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -118,7 +120,7 @@ class FileSystemImpl final : public FileSystem::Service {
   }
 };
 
-void RunServer() {
+void RunServer(const std::string& targetdir) {
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
   FileSystemImpl afs_service;
@@ -142,7 +144,16 @@ void RunServer() {
 }
 
 int main(int argc, char** argv) {
-  RunServer();
+  if ((argc < 2)) {
+    fprintf(stderr, "Usage: %s <targetdir>\n", argv[0]);
+    return 1;
+  }
+  if ((getuid() == 0) || (geteuid() == 0)) {
+      fprintf(stderr, "Running server as root can cause security issues.\n");
+      return 1;
+  }
+  std::string targetdir(argv[1]);  
+  RunServer(targetdir);
 
   return 0;
 }
