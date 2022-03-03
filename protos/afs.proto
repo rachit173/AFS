@@ -85,11 +85,24 @@ message FileSystemResponse {
   string data = 2;
 }
 
+message FileSystemFetchRequest {
+  string path = 1;
+  int32 size = 3;
+  int32 offset = 4;
+}
+
+message FileSystemStoreRequest {
+  string path = 1;
+  string data = 2;
+  int32 size = 3;
+  int32 offset = 4;
+}
+
 service FileSystem {
   // Fetch: Returns the status and (optionally) data of the specified file or directory.
-  rpc Fetch (FileSystemRequest) returns (FileSystemResponse) {} 
+  rpc Fetch (FileSystemFetchRequest) returns (FileSystemResponse) {} 
   // Store the status and (optionally) data of the specified file.
-  rpc Store (FileSystemRequest) returns (FileSystemResponse) {}
+  rpc Store (FileSystemStoreRequest) returns (FileSystemResponse) {}
   // Deletes the specified file
   rpc Remove (FileSystemRemoveRequest) returns (FileSystemResponse) {}
   // Create a new file
