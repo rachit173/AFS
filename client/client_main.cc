@@ -56,15 +56,14 @@ using afs::FileSystemStatResponse;
 using afs::FileSystemStatRequest;
 using afs::FileSystemReaddirRequest;
 using afs::FileSystemReaddirResponse;
-using afs::FileSystemDirStruct;
 
 #define CACHE_DIR "/tmp/afs_prototype"
 enum file_type{File, Directory};
-std::shared_ptr<Channel> channel;
+static std::shared_ptr<Channel> channel;
 
-struct dir_entry {
-    char name[100];
-    struct stat st;
+struct dir_structure {
+    char **files;
+    int length;
 };
 
 class FileSystemClient {
@@ -80,9 +79,13 @@ class FileSystemClient {
             Status status = stub_->Stat(&context, request, &reply);
         
             if (status.ok()) {
-                populateStatStruct(reply, st);
-                // reply
-                return 0;
+                if (reply.status() == 0){
+                    populateStatStruct(reply, st);
+                    // reply
+                    return 0;
+                } else {
+                    return -1;
+                }
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                         << std::endl;
@@ -93,26 +96,29 @@ class FileSystemClient {
         /**
          * Read directory content. Return null if error occurs
          */
-         struct dir_entry *readDir(const char *path) {
+         struct dir_structure *readDir(const char *path) {
             FileSystemReaddirRequest request;
             request.set_path(path); 
             FileSystemReaddirResponse reply;
             ClientContext context;
-            struct dir_entry *entry_list =
-                (struct dir_entry *)calloc(reply.files_size(), sizeof(struct dir_entry));
+            struct dir_structure *dir = (struct dir_structure *) calloc(1, sizeof(struct dir_structure));
+            char **file_list =
+                (char **)calloc(reply.filename_size(), sizeof(char *));
 
             Status status = stub_->Readdir(&context, request, &reply);
 
             // handle server response.
             if (status.ok()) {
-                for (int i = 0; i < reply.files_size(); i++) {
-                    // get file structure from the grpc message
-                    FileSystemDirStruct f = reply.files(i);
-                    strncpy(entry_list[i].name, f.filename().c_str(), sizeof(entry_list[i].name));
-                    struct stat *f_stat = &(entry_list[i].st);
-                    populateStatStruct(f.stat(), f_stat);
+
+                for (int i = 0; i < reply.filename_size(); i++) {
+                    const char *fileName = reply.filename(i).c_str();
+                    file_list[i] = (char *)calloc(1, strlen(fileName) + 1);
+                    strncpy(file_list[i], fileName, strlen(fileName));
+                    file_list[i][strlen(fileName)] = '\0';
                 }
-                return entry_list;
+                dir->files = file_list;
+                dir->length = reply.filename_size();
+                return dir;
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                     << std::endl;
@@ -188,7 +194,7 @@ static char *get_cache_name(const char *path, enum file_type type) {
     int path_length = strlen(path);
     int dir_length = strlen(CACHE_DIR);
     
-    char *cache_name = (char*)calloc(path_length + dir_length, sizeof(char));
+    char *cache_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
     strcat(cache_name, CACHE_DIR);
     strcat(cache_name, path);
     return cache_name;
@@ -279,26 +285,22 @@ static int afs_getattr(const char *path, struct stat *stbuf,
  * Optional, display the content of a directory. TODO 
  */
 static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi,
-		       enum fuse_readdir_flags flags)
+		       off_t offset, struct fuse_file_info *fi, enum fuse_readdir_flags flags)
 {
     FileSystemClient client(channel);
-    struct dir_entry *dir_entries = client.readDir(path);
+    struct dir_structure *dir_entries = client.readDir(path);
     if (NULL == dir_entries){
 		return -errno;
     }
 
-    long unsigned int entries_size = 
-        sizeof(*dir_entries)/sizeof(dir_entries[0]);
-    for (long unsigned int i = 0; i < entries_size; i++) {
+    char **file_names = dir_entries->files;
+    for (int i = 0; i < dir_entries->length; i++) {
+        char * entry = file_names[i];
         // fill in the directory
-        if (filler(
-            buf, dir_entries->name, &(dir_entries->st), 
-            0, (fuse_fill_dir_flags)0) == 0) {
-            break;
-        }
-
+        filler(buf, entry, NULL, 0, (fuse_fill_dir_flags)0);
+        free(entry);
     }
+    free(file_names);
     free(dir_entries);
     return 0;
 }
@@ -391,7 +393,7 @@ static int afs_create(const char *path, mode_t mode,
 	fi->fh = res;
 
 	// TODO: create server file
-	
+
 	return 0;
 }
 
@@ -400,11 +402,43 @@ static int afs_create(const char *path, mode_t mode,
  * Otherwise retrieve a copy from the server and store in local cache
  * If file not exist, throw error 
  */
-static int afs_open(const char *path, struct fuse_file_info *fi)
-{
-	int res;
+static int afs_open(const char *path, struct fuse_file_info *fi) {
+    printf("============open file %s\n", path);
+    // check if a cache exist
+    int get_new_file = 1;
+    char *cache_name = get_cache_name(path, File);
+    if(access(cache_name, F_OK ) == 0) {
+        // file exists
+        int ret = is_cache_valid(path);
+        if (1 == ret) {
+            get_new_file = 0;
+        } else if (0 > ret) {
+            // TODO Need to deal with the case when the file does not exist on server
+            // remove the cached file and return error
+            // mock don't get new file for now
+            get_new_file = 0;
+        }
+    }
 
-	res = open(path, fi->flags);
+    if (get_new_file == 1) {
+        // retrive a new copy from server, and replcae the cached file TODO
+        // flags should also be passed to the server
+        // If there is any error the errono should be returned
+        if (strcmp( path, "/test_file" ) == 0) {
+            printf("============file %s is retrived from the server\n", path);
+            char str[] = "haha this is a new file from server\n";
+            FILE * f = fopen(cache_name, "w");
+            for (int i = 0; str[i] != '\n'; i++) {
+                /* write to file using fputc() function */
+                fputc(str[i], f);
+            }
+            fclose(f);
+        }
+    }
+
+	int res;
+	res = open(cache_name, fi->flags);
+    free(cache_name);
 	if (res == -1)
 		return -errno;
 
@@ -413,20 +447,21 @@ static int afs_open(const char *path, struct fuse_file_info *fi)
 }
 
 /*
- * Read from a file's cached copy. TODO
- * If no cached copy exists this should get a copy from server.
+ * Read from a file's cached copy
  */
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 	int fd;
 	int res;
+    char *cache_name = get_cache_name(path, File);
 
 	if(fi == NULL)
-		fd = open(path, O_RDONLY);
+		fd = open(cache_name, O_RDONLY);
 	else
 		fd = fi->fh;
-	
+    free(cache_name);
+
 	if (fd == -1)
 		return -errno;
 
@@ -448,13 +483,15 @@ static int afs_write(const char *path, const char *buf, size_t size,
 {
 	int fd;
 	int res;
+    char *cache_name = get_cache_name(path, File);
 
 	(void) fi;
 	if(fi == NULL)
-		fd = open(path, O_WRONLY);
+		fd = open(cache_name, O_WRONLY);
 	else
 		fd = fi->fh;
-	
+    free(cache_name);
+
 	if (fd == -1)
 		return -errno;
 

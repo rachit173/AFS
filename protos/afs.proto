@@ -75,13 +75,8 @@ message FileSystemStatResponse {
   TimeSpec lastStatusChange = 8;
 }
 
-message FileSystemDirStruct {
-  string fileName = 1;
-  FileSystemStatResponse stat = 2;
-}
-
 message FileSystemReaddirResponse {
-  repeated FileSystemDirStruct files = 1;
+  repeated string fileName = 1;
 }
 
 message FileSystemResponse {

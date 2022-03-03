@@ -32,6 +32,8 @@ using afs::FileSystemStatRequest;
 using afs::FileSystemStatResponse;
 using afs::FileSystemResponse;
 using afs::TimeSpec;
+using afs::FileSystemReaddirRequest;
+using afs::FileSystemReaddirResponse;
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -44,6 +46,16 @@ class GreeterServiceImpl final : public Greeter::Service {
 };
 
 class FileSystemImpl final : public FileSystem::Service {
+
+  Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
+    FileSystemReaddirResponse *reply) override {
+      // TODO this is a mock
+      reply->add_filename("test_file");
+      reply->add_filename("test_directory");
+
+      return Status::OK;
+  }
+
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
                   FileSystemResponse *reply) override {
     int ret = mkdir(request->path().c_str(), 0777);
@@ -109,6 +121,7 @@ class FileSystemImpl final : public FileSystem::Service {
 void RunServer() {
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
+  FileSystemImpl afs_service;
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
@@ -118,6 +131,7 @@ void RunServer() {
   // Register "service" as the instance through which we'll communicate with
   // clients. In this case it corresponds to an *synchronous* service.
   builder.RegisterService(&service);
+  builder.RegisterService(&afs_service);
   // Finally assemble the server.
   std::unique_ptr<Server> server(builder.BuildAndStart());
   std::cout << "Server listening on " << server_address << std::endl;
