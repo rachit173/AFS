@@ -56,6 +56,11 @@ using afs::FileSystemStatResponse;
 using afs::FileSystemStatRequest;
 using afs::FileSystemReaddirRequest;
 using afs::FileSystemReaddirResponse;
+using afs::FileSystemMakedirRequest;
+using afs::FileSystemRemoveRequest;
+using afs::FileSystemRemovedirRequest;
+using afs::FileSystemRenameRequest;
+using afs::FileSystemCreateRequest;
 
 #define CACHE_DIR "/tmp/afs_prototype"
 enum file_type{File, Directory};
@@ -123,6 +128,92 @@ class FileSystemClient {
                 std::cout << status.error_code() << ": " << status.error_message()
                     << std::endl;
                 return NULL;
+            }
+        }
+
+        int mkdir(const char *path) {
+            FileSystemMakedirRequest request;
+            request.set_path(path);
+            FileSystemResponse response;
+            ClientContext context;
+
+            Status status = stub_->Makedir(&context, request, &response);
+
+            if (status.ok()) {
+                return 1;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
+            }
+        }
+
+        int unlink(const char *path) {
+            FileSystemRemoveRequest request;
+            request.set_path(path);
+            FileSystemResponse response;
+            ClientContext context;
+
+            Status status = stub_->Remove(&context, request, &response);
+
+            if (status.ok()) {
+                return 1;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
+            }
+        }
+
+        int rmdir(const char *path) {
+            FileSystemRemovedirRequest request;
+            request.set_path(path);
+            FileSystemResponse response;
+            ClientContext context;
+
+            Status status = stub_->Removedir(&context, request, &response);
+
+            if (status.ok()) {
+                return 1;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
+            }
+        }
+
+        int rename(const char *fromPath, const char *toPath) {
+            FileSystemRenameRequest request;
+            request.set_frompath(fromPath);
+            request.set_topath(toPath);
+            FileSystemResponse response;
+            ClientContext context;
+
+            Status status = stub_->Rename(&context, request, &response);
+
+            if (status.ok()) {
+                return 1;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
+            }
+        }
+
+        int create(const char *path) {
+            FileSystemCreateRequest request;
+            request.set_path(path);
+            FileSystemResponse response;
+            ClientContext context;
+
+            Status status = stub_->Create(&context, request, &response);
+
+            if (status.ok()) {
+                return 1;
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
             }
         }
 
@@ -270,15 +361,15 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 static int afs_getattr(const char *path, struct stat *stbuf,
 		       struct fuse_file_info *fi)
 {
-	(void) fi;
+    (void) fi;
 
-	// we have to call the server anyway, because checking valid also involves a server call of getStat()
-	FileSystemClient client(channel);
-	if (-1 == client.getStat(path, stbuf)){
-		return -errno;
-    	}
+    // we have to call the server anyway, because checking valid also involves a server call of getStat()
+    FileSystemClient client(channel);
+    if (-1 == client.getStat(path, stbuf)){
+        return -errno;
+    }
 
-	return 0;
+    return 0;
 }
 
 /**
@@ -305,96 +396,123 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return 0;
 }
 
-/*
- * Call the server to make a directory. TODO
+/**
+ * Make a directory on both server and cache.
  */
 static int afs_mkdir(const char *path, mode_t mode)
 {
-	int res;
+    int res;
 
-	res = mkdir(path, mode);
-	if (res == -1)
-		return -errno;
+    // mkdir locally
+    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    res = mkdir(cachePath.c_str(), mode);
+    if (res == -1)
+        return -errno;
 
-	return 0;
+    // server-side
+    FileSystemClient client(channel);
+    if (-1 == client.mkdir(path)){
+        return -errno;
+    }
+
+    return 0;
 }
 
 /**
- * Remove a file from both server and cache TODO
+ * Remove a file from both server and cache.
  */
 static int afs_unlink(const char *path)
 {
-	int res;
+    int res;
 
-	// unlink cache copy
-	std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-	res = unlink(cachePath.c_str());
-	if (res == -1)
-		return -errno;
+    // unlink cache copy
+    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    res = unlink(cachePath.c_str());
+    if (res == -1)
+        return -errno;
 
-	// TODO: unlink server file
+    // server-side
+    FileSystemClient client(channel);
+    if (-1 == client.unlink(path)){
+        return -errno;
+    }
 
-	return 0;
+    return 0;
 }
 
 /**
- * Simply redirect call to the server to remove a directory, and remove it from cache. TODO
- * I think this should only succed if the directory is empty?
+ * Remove a directory on both server and cache.
  */
 static int afs_rmdir(const char *path)
 {
-	int res;
+    int res;
 
-	res = rmdir(path);
-	if (res == -1)
-		return -errno;
+    // rmdir locally
+    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    res = rmdir(cachePath.c_str());
+    if (res == -1)
+        return -errno;
 
-	return 0;
+    // server-side
+    FileSystemClient client(channel);
+    if (-1 == client.rmdir(path)){
+       return -errno;
+    }
+
+    return 0;
 }
 
 /**
- * I believe this is an optional operation? set aside for now
+ * Rename the file on both server and cache.
  */
 static int afs_rename(const char *from, const char *to, unsigned int flags)
 {
-	int res;
+    int res;
 
-	if (flags)
-		return -EINVAL;
+    if (flags)
+      return -EINVAL;
 
-	// rename cache copy
-	std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
-	std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
-	res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
-	if (res == -1)
-		return -errno;
+    // rename cache copy
+    std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
+    std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
+    res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
+    if (res == -1)
+        return -errno;
 
-	// TODO: rename server copy
+    // server-side
+    FileSystemClient client(channel);
+    if (-1 == client.rename(from, to)){
+        return -errno;
+    }
 
-	return 0;
+    return 0;
 }
 
 /*
- * Create an empty file and open it on the server right away TODO
+ * Create an empty file on both server and cache, then open the cache copy.
  */
 static int afs_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
-	int res;
+    int res;
 
-	mode |= O_CREAT;
+    mode |= O_CREAT;
 
-	// create cache copy
-	std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-	res = open(cachePath.c_str(), fi->flags, mode);
-	if (res == -1)
-		return -errno;
+    // create cache copy
+    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    res = open(cachePath.c_str(), fi->flags, mode);
+    if (res == -1)
+        return -errno;
 
-	fi->fh = res;
+    fi->fh = res;
 
-	// TODO: create server file
+    // server-side
+    FileSystemClient client(channel);
+    if (-1 == client.create(path)){
+        return -errno;
+    }
 
-	return 0;
+    return 0;
 }
 
 /*
@@ -447,7 +565,7 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 /*
- * Read from a file's cached copy
+ * Read from a file's cached copy, need to check valid first TODO
  */
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
