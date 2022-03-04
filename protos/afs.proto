@@ -101,8 +101,6 @@ message FileSystemFetchResponse {
 message FileSystemStoreRequest {
   string path = 1;
   string data = 2;
-  int32 size = 3;
-  int32 offset = 4;
 }
 
 message FileSystemStoreResponse {
