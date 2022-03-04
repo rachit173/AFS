@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <utime.h>
 #include <stdint.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -61,6 +62,8 @@ using afs::FileSystemRemoveRequest;
 using afs::FileSystemRemovedirRequest;
 using afs::FileSystemRenameRequest;
 using afs::FileSystemCreateRequest;
+using afs::FileSystemStoreRequest;
+using afs::FileSystemStoreResponse;
 
 #define CACHE_DIR "/tmp/afs_prototype"
 #define CACHE_VERSION_DIR "/tmp/afs_prototype.version_file"
@@ -193,7 +196,7 @@ class FileSystemClient {
             Status status = stub_->Rename(&context, request, &response);
 
             if (status.ok()) {
-                return 1;
+                return response.status();
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                           << std::endl;
@@ -210,12 +213,37 @@ class FileSystemClient {
             Status status = stub_->Create(&context, request, &response);
 
             if (status.ok()) {
-                return 1;
+                return response.status();
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                           << std::endl;
                 return -1;
             }
+        }
+
+        int store(const char *path, const char *data) {
+            FileSystemStoreRequest request;
+            request.set_path(path);
+            request.set_data(data);
+            FileSystemStoreResponse response;
+            ClientContext context;
+
+            Status status = stub_->Store(&context, request, &response);
+
+            if (status.ok()) {
+                return response.status();
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                return -1;
+            }
+        }
+
+        /**
+         * Store data at given path, and create the version file
+         */
+        int fetch(const char *path) {
+            return -1;
         }
 
     private:
@@ -328,7 +356,7 @@ static int is_cache_valid(const char *path) {
     free(cached_file_version); 
 
     // compare the last modified time
-    if (st_server_file.st_atime <= st_cache_version.st_atime) {
+    if (st_server_file.st_mtime <= st_cache_version.st_mtime) {
         return 1;    
     }
     return 0;
@@ -359,7 +387,7 @@ static int is_cache_dirty(const char *path) {
     free(cached_file_version); 
 
     // compare the last modified time
-    if (st_cache.st_atime > st_cache_version.st_atime) {
+    if (st_cache.st_mtime > st_cache_version.st_mtime) {
         return 1;
     }
     return 0;
@@ -595,6 +623,7 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
     if(access(cache_name, F_OK ) == 0) {
         // file exists
         int ret = is_cache_valid(path);
+        printf("============is cache valid %d\n", ret);
         if (1 == ret) {
             get_new_file = 0;
         } else if (0 > ret) {
@@ -613,12 +642,26 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         if (strcmp( path, "/test_file" ) == 0) {
             printf("============file %s is retrived from the server\n", path);
             char str[] = "haha this is a new file from server\n";
-            FILE * f = fopen(cache_name, "w");
+            char *cache_version_name = get_cache_version_name(path);
+            FILE * server_f = fopen(cache_name, "w");
             for (int i = 0; str[i] != '\n'; i++) {
                 /* write to file using fputc() function */
-                fputc(str[i], f);
+                fputc(str[i], server_f);
             }
-            fclose(f);
+            // modify last modified time for the cache version file
+            /*Mock server return*/
+            struct stat buf;
+            stat(path, &buf);
+            buf.st_mtim.tv_sec = 100;
+            /**/
+            FILE * version_f = fopen(cache_version_name, "w");
+            fclose(version_f);
+            struct utimbuf stat_time;
+            stat_time.modtime = buf.st_mtim.tv_sec;
+            utime(cache_version_name, &stat_time);
+            free(cache_version_name);
+
+            fclose(server_f);
         }
     }
 
@@ -638,6 +681,7 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+    printf("============read file %s\n", path);
 	int fd;
 	int res;
     char *cache_name = get_cache_name(path);
@@ -695,9 +739,25 @@ static int afs_write(const char *path, const char *buf, size_t size,
  */
 static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
+    printf("============flush file %s\n", path);
     if (is_cache_dirty(path) == 1) {
+        printf("============file is dirty %s\n", path);
         // only flush to server if the file is dirty
         // call the server call store
+        char *cache_name = get_cache_name(path);
+        FILE* f = fopen(cache_name, "r");
+        free(cache_name);
+
+        // Determine file size
+        fseek(f, 0, SEEK_END);
+        size_t size = ftell(f);
+
+        char* data = new char[size];
+        rewind(f);
+        fread(data, sizeof(char), size, f);
+        
+        FileSystemClient client(channel);
+        client.store(path, data);
     }
 	return 0;
 }

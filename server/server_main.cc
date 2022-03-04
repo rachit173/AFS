@@ -83,7 +83,7 @@ public:
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path());
 
-    int ret = creat(path.c_str(), O_CREAT);
+    int ret = creat(path.c_str(), O_CREAT | 0777);
     if (ret != 0) {
       ret = errno;
     }
@@ -210,21 +210,23 @@ public:
         lastmodification->set_nsec(buf.st_mtim.tv_nsec);
       }
     }
+    close(fd);
     return Status::OK;
   }
   Status Store(ServerContext* context, const FileSystemStoreRequest *request,
                   FileSystemStoreResponse *reply) override {
     std::string path = serverPath(request->path());
-    int size = request->size();
-    int offset = request->offset();
-    auto data = request->data();
+    std::string data = request->data();
     int fd = open(path.c_str(), O_WRONLY);
     if (fd == -1) {
       reply->set_status(errno);
     } else {
-      int res = pwrite(fd, data.c_str(), size, offset);
+      std::cout << request->data().size() << std::endl;
+      int res = pwrite(fd, data.c_str(), request->data().size(), 0);
       reply->set_status(errno);
     }
+
+    close(fd);
     return Status::OK;
   }
   std::string serverPath(const std::string& relative_path) {
