@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
@@ -56,12 +57,31 @@ public:
   }
 
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
-    FileSystemReaddirResponse *reply) override {
-      // TODO this is a mock
-      reply->add_filename("test_file");
-      reply->add_filename("test_directory");
+        FileSystemReaddirResponse *reply) override {
+    std::string path = this->root + "/" + request->path().c_str();
+    DIR *dirp;
+    struct dirent *dp;
 
+    if ((dirp = opendir(path.c_str())) == NULL) {
+      reply->set_status(errno);
       return Status::OK;
+    }
+
+    errno = 0;
+    while (true) {
+      dp = readdir(dirp);
+      if (dp == NULL)
+        break;
+
+      // For now . and .. are causing issues with ls, so ignore them
+      // It looks like the need READDIRPLUS implemented
+      if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0)
+        reply->add_filename(dp->d_name);
+    }
+
+    reply->set_status(errno);
+
+    return Status::OK;
   }
 
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,

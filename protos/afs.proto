@@ -78,6 +78,7 @@ message FileSystemStatResponse {
 
 message FileSystemReaddirResponse {
   repeated string fileName = 1;
+  int32 status = 2;
 }
 
 message FileSystemResponse {
