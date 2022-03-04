@@ -46,6 +46,14 @@ class GreeterServiceImpl final : public Greeter::Service {
 };
 
 class FileSystemImpl final : public FileSystem::Service {
+private:
+  // The root of the filesystem on our local filesystem
+  std::string root;
+
+public:
+  FileSystemImpl(std::string root) : FileSystem::Service() {
+    this->root = root;
+  }
 
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
     FileSystemReaddirResponse *reply) override {
@@ -58,7 +66,8 @@ class FileSystemImpl final : public FileSystem::Service {
 
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
                   FileSystemResponse *reply) override {
-    int ret = mkdir(request->path().c_str(), 0777);
+    std::string path = this->root + "/" + request->path().c_str();
+    int ret = mkdir(path.c_str(), 0777);
 
     //Mkdir return -1 on error and sets errno to error code
     if (ret == -1) {
@@ -72,7 +81,8 @@ class FileSystemImpl final : public FileSystem::Service {
 
   Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
                   FileSystemResponse *reply) override {
-    int ret = rmdir(request->path().c_str());
+    std::string path = this->root + "/" + request->path().c_str();
+    int ret = rmdir(path.c_str());
 
     //rmdir returns -1 on error and sets errno
     if (ret == -1) {
@@ -91,7 +101,8 @@ class FileSystemImpl final : public FileSystem::Service {
     TimeSpec *lastModification;
     TimeSpec *lastStatusChange;
     struct stat buf;
-    int ret = stat(request->path().c_str(), &buf);
+    std::string path = this->root + "/" + request->path().c_str();
+    int ret = stat(path.c_str(), &buf);
 
     // returns -1 on error and sets errno
     if (ret == -1) {
@@ -118,10 +129,10 @@ class FileSystemImpl final : public FileSystem::Service {
   }
 };
 
-void RunServer() {
+void RunServer(std::string root) {
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
-  FileSystemImpl afs_service;
+  FileSystemImpl afs_service(root);
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
@@ -142,7 +153,13 @@ void RunServer() {
 }
 
 int main(int argc, char** argv) {
-  RunServer();
+  if (argc < 2) {
+    std::cout << "Must supply a root directory to store the file system" << std::endl;
+    return -1;
+  }
+  std::string root = argv[1];
+
+  RunServer(root);
 
   return 0;
 }
