@@ -178,7 +178,7 @@ class FileSystemClient {
             Status status = stub_->Removedir(&context, request, &response);
 
             if (status.ok()) {
-                return 1;
+                return -response.status();
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
                           << std::endl;
@@ -554,8 +554,8 @@ static int afs_rmdir(const char *path)
 
     // server-side
     FileSystemClient client(channel);
-    if (-1 == client.rmdir(path)){
-       return -errno;
+    if ((res = client.rmdir(path)) < 0){
+       return res;
     }
 
     return 0;
