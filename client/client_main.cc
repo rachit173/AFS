@@ -494,17 +494,17 @@ static int afs_mkdir(const char *path, mode_t mode)
 {
     int res;
 
-    // mkdir locally
-    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-    res = mkdir(cachePath.c_str(), mode);
-    if (res == -1)
-        return -errno;
-
     // server-side
     FileSystemClient client(channel);
     if (-1 == client.mkdir(path)){
         return -errno;
     }
+
+    // mkdir locally
+    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    res = mkdir(cachePath.c_str(), mode);
+    if (res == -1)
+        return -errno;
 
     return 0;
 }
