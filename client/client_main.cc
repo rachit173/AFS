@@ -490,8 +490,10 @@ static int afs_unlink(const char *path)
     // unlink cache copy
     std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
     res = unlink(cachePath.c_str());
-    if (res == -1)
-        return -errno;
+    // Don't error out if the cached copy doesn't exist because we might want
+    // to still delete a file if we don't have it cached.
+//    if (res == -1)
+//        return -errno;
 
     // server-side
     FileSystemClient client(channel);

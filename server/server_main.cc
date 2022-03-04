@@ -33,6 +33,7 @@ using afs::HelloRequest;
 using afs::HelloReply;
 using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
+using afs::FileSystemRemoveRequest;
 using afs::FileSystemRemovedirRequest;
 using afs::FileSystemFetchRequest;
 using afs::FileSystemFetchResponse;
@@ -64,8 +65,21 @@ private:
 public:
   FileSystemImpl(std::string root) : FileSystem::Service(), root_(root) {}
 
+  Status Remove(ServerContext* context, const FileSystemRemoveRequest* request,
+                  FileSystemResponse *reply) override {
+    std::string path = this->root + "/" + request->path().c_str();
+
+    int ret = unlink(path.c_str());
+    if (ret != 0)
+      ret = errno;
+
+    reply->set_status(errno);
+
+    return Status::OK;
+  }
+
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
-        FileSystemReaddirResponse *reply) override {
+                  FileSystemReaddirResponse *reply) override {
     std::string path = serverPath(request->path());
     DIR *dirp;
     struct dirent *dp;
