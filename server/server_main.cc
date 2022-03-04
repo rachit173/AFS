@@ -128,8 +128,7 @@ public:
 
       // For now . and .. are causing issues with ls, so ignore them
       // It looks like the need READDIRPLUS implemented
-      if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0)
-        reply->add_filename(dp->d_name);
+      reply->add_filename(dp->d_name);
     }
 
     reply->set_status(errno);

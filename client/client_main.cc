@@ -108,14 +108,14 @@ class FileSystemClient {
             FileSystemReaddirResponse reply;
             ClientContext context;
             struct dir_structure *dir = (struct dir_structure *) calloc(1, sizeof(struct dir_structure));
-            char **file_list =
-                (char **)calloc(reply.filename_size(), sizeof(char *));
+            char **file_list;
 
             Status status = stub_->Readdir(&context, request, &reply);
+            file_list =
+                (char **)calloc(reply.filename_size(), sizeof(char *));
 
             // handle server response.
             if (status.ok()) {
-
                 for (int i = 0; i < reply.filename_size(); i++) {
                     const char *fileName = reply.filename(i).c_str();
                     file_list[i] = (char *)calloc(1, strlen(fileName) + 1);
