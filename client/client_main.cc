@@ -543,8 +543,8 @@ static int afs_rmdir(const char *path)
     // rmdir locally
     std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
     res = rmdir(cachePath.c_str());
-    if (res == -1)
-        return -errno;
+//    if (res == -1)
+//        return -errno;
 
     // server-side
     FileSystemClient client(channel);
