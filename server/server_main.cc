@@ -35,7 +35,9 @@ using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
 using afs::FileSystemRemovedirRequest;
 using afs::FileSystemFetchRequest;
+using afs::FileSystemFetchResponse;
 using afs::FileSystemStoreRequest;
+using afs::FileSystemStoreResponse;
 using afs::FileSystemStatRequest;
 using afs::FileSystemStatResponse;
 using afs::FileSystemResponse;
@@ -60,6 +62,7 @@ class FileSystemImpl final : public FileSystem::Service {
  private:
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
     FileSystemReaddirResponse *reply) override {
+      std::string path = serverPath(request->path());
       // TODO this is a mock
       reply->add_filename("test_file");
       reply->add_filename("test_directory");
@@ -69,7 +72,8 @@ class FileSystemImpl final : public FileSystem::Service {
 
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
                   FileSystemResponse *reply) override {
-    int ret = mkdir(request->path().c_str(), 0777);
+    std::string path = serverPath(request->path());
+    int ret = mkdir(path.c_str(), 0777);
 
     //Mkdir return -1 on error and sets errno to error code
     if (ret == -1) {
@@ -83,7 +87,8 @@ class FileSystemImpl final : public FileSystem::Service {
 
   Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
                   FileSystemResponse *reply) override {
-    int ret = rmdir(request->path().c_str());
+    std::string path = serverPath(request->path());
+    int ret = rmdir(path.c_str());
 
     //rmdir returns -1 on error and sets errno
     if (ret == -1) {
@@ -98,11 +103,12 @@ class FileSystemImpl final : public FileSystem::Service {
 
   Status Stat(ServerContext* context, const FileSystemStatRequest *request,
                   FileSystemStatResponse *reply) override {
+    std::string path = serverPath(request->path());
     TimeSpec *lastAccess;
     TimeSpec *lastModification;
     TimeSpec *lastStatusChange;
     struct stat buf;
-    int ret = stat(request->path().c_str(), &buf);
+    int ret = stat(path.c_str(), &buf);
 
     // returns -1 on error and sets errno
     if (ret == -1) {
@@ -128,7 +134,7 @@ class FileSystemImpl final : public FileSystem::Service {
     return Status::OK;
   }
   Status Fetch(ServerContext* context, const FileSystemFetchRequest *request,
-                  FileSystemResponse *reply) override {
+                  FileSystemFetchResponse *reply) override {
     std::string path = serverPath(request->path());
     int size = request->size();
     int offset = request->offset();
@@ -139,15 +145,35 @@ class FileSystemImpl final : public FileSystem::Service {
     data->reserve(size+1);
     int fd = open(path.c_str(), O_RDONLY);
     if (fd == -1) {
-      reply->set_status(fd);
+      reply->set_status(errno);
     } else {
       int res = pread(fd, data, size, offset);
-      reply->set_status(res);
+      reply->set_status(errno);
+      struct stat buf;
+      res = stat(path.c_str(), &buf);
+      if (res == -1) {
+        reply->set_status(errno);
+      } else {
+        auto lastmodification = reply->mutable_lastmodification();
+        lastmodification->set_sec(buf.st_mtim.tv_sec);
+        lastmodification->set_nsec(buf.st_mtim.tv_nsec);
+      }
     }
     return Status::OK;
   }
   Status Store(ServerContext* context, const FileSystemStoreRequest *request,
-                  FileSystemResponse *reply) override {
+                  FileSystemStoreResponse *reply) override {
+    std::string path = serverPath(request->path());
+    int size = request->size();
+    int offset = request->offset();
+    auto data = request->data();
+    int fd = open(path.c_str(), O_WRONLY);
+    if (fd == -1) {
+      reply->set_status(errno);
+    } else {
+      int res = pwrite(fd, data.c_str(), size, offset);
+      reply->set_status(errno);
+    }
     return Status::OK;
   }
   std::string serverPath(const std::string& relative_path) {
