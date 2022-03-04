@@ -91,6 +91,12 @@ message FileSystemFetchRequest {
   int32 offset = 4;
 }
 
+message FileSystemFetchResponse {
+  int32 status = 1;
+  string data = 2;
+  TimeSpec lastModification = 7;
+}
+
 message FileSystemStoreRequest {
   string path = 1;
   string data = 2;
@@ -98,11 +104,15 @@ message FileSystemStoreRequest {
   int32 offset = 4;
 }
 
+message FileSystemStoreResponse {
+  int32 status = 1;
+}
+
 service FileSystem {
   // Fetch: Returns the status and (optionally) data of the specified file or directory.
-  rpc Fetch (FileSystemFetchRequest) returns (FileSystemResponse) {} 
+  rpc Fetch (FileSystemFetchRequest) returns (FileSystemFetchResponse) {} 
   // Store the status and (optionally) data of the specified file.
-  rpc Store (FileSystemStoreRequest) returns (FileSystemResponse) {}
+  rpc Store (FileSystemStoreRequest) returns (FileSystemStoreResponse) {}
   // Deletes the specified file
   rpc Remove (FileSystemRemoveRequest) returns (FileSystemResponse) {}
   // Create a new file
