@@ -221,7 +221,7 @@ class FileSystemClient {
     private:
         std::unique_ptr<FileSystem::Stub> stub_;
         void populateStatStruct(FileSystemStatResponse reply, struct stat *st) {
-            std::timespec atime, mtime;
+            timespec atime, mtime;
             atime.tv_sec = reply.lastaccess().sec();
             atime.tv_nsec = reply.lastaccess().nsec();
             mtime.tv_sec = reply.lastmodification().sec();
@@ -573,7 +573,7 @@ static int afs_create(const char *path, mode_t mode,
     // retrived from the server. 
     FileSystemClient client(channel);
     if (-1 == client.create(path)){
-        return -errno;
+        return -errno;O_RDONLY
     }
 
     return 0;

@@ -3,11 +3,16 @@
 #include <memory>
 #include <string>
 
-#include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <ctype.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <dirent.h>
+#include <errno.h>
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
@@ -29,12 +34,17 @@ using afs::HelloReply;
 using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
 using afs::FileSystemRemovedirRequest;
+using afs::FileSystemFetchRequest;
+using afs::FileSystemFetchResponse;
+using afs::FileSystemStoreRequest;
+using afs::FileSystemStoreResponse;
 using afs::FileSystemStatRequest;
 using afs::FileSystemStatResponse;
 using afs::FileSystemResponse;
 using afs::TimeSpec;
 using afs::FileSystemReaddirRequest;
 using afs::FileSystemReaddirResponse;
+
 
 // Logic and data behind the server's behavior.
 class GreeterServiceImpl final : public Greeter::Service {
@@ -49,16 +59,14 @@ class GreeterServiceImpl final : public Greeter::Service {
 class FileSystemImpl final : public FileSystem::Service {
 private:
   // The root of the filesystem on our local filesystem
-  std::string root;
+  std::string root_;
 
 public:
-  FileSystemImpl(std::string root) : FileSystem::Service() {
-    this->root = root;
-  }
+  FileSystemImpl(std::string root) : FileSystem::Service(), root_(root) {}
 
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
         FileSystemReaddirResponse *reply) override {
-    std::string path = this->root + "/" + request->path().c_str();
+    std::string path = serverPath(request->path());
     DIR *dirp;
     struct dirent *dp;
 
@@ -86,7 +94,7 @@ public:
 
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
                   FileSystemResponse *reply) override {
-    std::string path = this->root + "/" + request->path().c_str();
+    std::string path = serverPath(request->path());
     int ret = mkdir(path.c_str(), 0777);
 
     //Mkdir return -1 on error and sets errno to error code
@@ -101,7 +109,7 @@ public:
 
   Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
                   FileSystemResponse *reply) override {
-    std::string path = this->root + "/" + request->path().c_str();
+    std::string path = serverPath(request->path());
     int ret = rmdir(path.c_str());
 
     //rmdir returns -1 on error and sets errno
@@ -117,11 +125,11 @@ public:
 
   Status Stat(ServerContext* context, const FileSystemStatRequest *request,
                   FileSystemStatResponse *reply) override {
+    std::string path = serverPath(request->path());
     TimeSpec *lastAccess;
     TimeSpec *lastModification;
     TimeSpec *lastStatusChange;
     struct stat buf;
-    std::string path = this->root + "/" + request->path().c_str();
     int ret = stat(path.c_str(), &buf);
 
     // returns -1 on error and sets errno
@@ -147,7 +155,54 @@ public:
 
     return Status::OK;
   }
+  Status Fetch(ServerContext* context, const FileSystemFetchRequest *request,
+                  FileSystemFetchResponse *reply) override {
+    std::string path = serverPath(request->path());
+    int size = request->size();
+    int offset = request->offset();
+    std::string* data = reply->mutable_data();
+    if (size < 0) {
+      size = 64*1024*1024; // 64 MB default file size if not specified.
+    }
+    data->reserve(size+1);
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd == -1) {
+      reply->set_status(errno);
+    } else {
+      int res = pread(fd, data, size, offset);
+      reply->set_status(errno);
+      struct stat buf;
+      res = stat(path.c_str(), &buf);
+      if (res == -1) {
+        reply->set_status(errno);
+      } else {
+        auto lastmodification = reply->mutable_lastmodification();
+        lastmodification->set_sec(buf.st_mtim.tv_sec);
+        lastmodification->set_nsec(buf.st_mtim.tv_nsec);
+      }
+    }
+    return Status::OK;
+  }
+  Status Store(ServerContext* context, const FileSystemStoreRequest *request,
+                  FileSystemStoreResponse *reply) override {
+    std::string path = serverPath(request->path());
+    int size = request->size();
+    int offset = request->offset();
+    auto data = request->data();
+    int fd = open(path.c_str(), O_WRONLY);
+    if (fd == -1) {
+      reply->set_status(errno);
+    } else {
+      int res = pwrite(fd, data.c_str(), size, offset);
+      reply->set_status(errno);
+    }
+    return Status::OK;
+  }
+  std::string serverPath(const std::string& relative_path) {
+    return root_ + "/" + relative_path;
+  }
 };
+
 
 void RunServer(std::string root) {
   std::string server_address("0.0.0.0:50051");
@@ -173,13 +228,16 @@ void RunServer(std::string root) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 2) {
-    std::cout << "Must supply a root directory to store the file system" << std::endl;
-    return -1;
+  if ((argc < 2)) {
+    fprintf(stderr, "Usage: %s <targetdir>\n", argv[0]);
+    return 1;
   }
-  std::string root = argv[1];
-
-  RunServer(root);
+  if ((getuid() == 0) || (geteuid() == 0)) {
+      fprintf(stderr, "Running server as root can cause security issues.\n");
+      return 1;
+  }
+  std::string targetdir(argv[1]);  
+  RunServer(targetdir);
 
   return 0;
 }
