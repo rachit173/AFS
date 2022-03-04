@@ -35,6 +35,7 @@ using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
 using afs::FileSystemRemoveRequest;
 using afs::FileSystemCreateRequest;
+using afs::FileSystemRenameRequest;
 using afs::FileSystemRemovedirRequest;
 using afs::FileSystemFetchRequest;
 using afs::FileSystemFetchResponse;
@@ -92,6 +93,21 @@ public:
 
     return Status::OK;
   }
+
+  Status Rename(ServerContext* context, const FileSystemRenameRequest* request,
+                  FileSystemResponse *reply) override {
+    std::string fromPath = serverPath(request->frompath());
+    std::string toPath = serverPath(request->topath());
+
+    int ret = rename(fromPath.c_str(), toPath.c_str());
+    if (ret != 0) {
+      ret = errno;
+    }
+
+    reply->set_status(errno);
+
+    return Status::OK;
+  };
 
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
                   FileSystemReaddirResponse *reply) override {

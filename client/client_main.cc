@@ -541,8 +541,9 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
     std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
     std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
     res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
-    if (res == -1)
-        return -errno;
+    // We may still want to rename the file even if we don't have it in the cache
+//    if (res == -1)
+//        return -errno;
 
     // server-side
     FileSystemClient client(channel);
