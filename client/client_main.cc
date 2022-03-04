@@ -576,7 +576,7 @@ static int afs_create(const char *path, mode_t mode,
     // retrived from the server. 
     FileSystemClient client(channel);
     if (-1 == client.create(path)){
-        return -errno;O_RDONLY
+        return -errno;
     }
 
     return 0;
