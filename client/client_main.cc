@@ -90,7 +90,7 @@ class FileSystemClient {
                     // reply
                     return 0;
                 } else {
-                    return -1;
+                    return -reply.status();
                 }
             } else {
                 std::cout << status.error_code() << ": " << status.error_message()
@@ -426,9 +426,10 @@ static int afs_getattr(const char *path, struct stat *stbuf,
 {
     (void) fi;
 
+    int ret;
     FileSystemClient client(channel);
-    if (-1 == client.getStat(path, stbuf)){
-        return -errno;
+    if ((ret = client.getStat(path, stbuf)) < 0){
+        return ret;
     }
 
     return 0;

@@ -34,6 +34,7 @@ using afs::HelloReply;
 using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
 using afs::FileSystemRemoveRequest;
+using afs::FileSystemCreateRequest;
 using afs::FileSystemRemovedirRequest;
 using afs::FileSystemFetchRequest;
 using afs::FileSystemFetchResponse;
@@ -72,6 +73,20 @@ public:
     int ret = unlink(path.c_str());
     if (ret != 0)
       ret = errno;
+
+    reply->set_status(errno);
+
+    return Status::OK;
+  }
+
+  Status Create(ServerContext* context, const FileSystemCreateRequest* request,
+                  FileSystemResponse *reply) override {
+    std::string path = serverPath(request->path());
+
+    int ret = creat(path.c_str(), O_CREAT);
+    if (ret != 0) {
+      ret = errno;
+    }
 
     reply->set_status(errno);
 
