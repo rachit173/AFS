@@ -68,7 +68,7 @@ public:
 
   Status Remove(ServerContext* context, const FileSystemRemoveRequest* request,
                   FileSystemResponse *reply) override {
-    std::string path = this->root + "/" + request->path().c_str();
+    std::string path = serverPath(request->path().c_str());
 
     int ret = unlink(path.c_str());
     if (ret != 0)
