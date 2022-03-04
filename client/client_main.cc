@@ -460,6 +460,12 @@ static int afs_getattr(const char *path, struct stat *stbuf,
         return ret;
     }
 
+    // If the stated path is a directory, cache it
+    if (S_ISDIR(stbuf->st_mode)) {
+        std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+        mkdir(cachePath.c_str(), stbuf->st_mode);
+    }
+
     return 0;
 }
 
