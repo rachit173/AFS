@@ -3,11 +3,16 @@
 #include <memory>
 #include <string>
 
-
-#include <errno.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <ctype.h>
+#include <libgen.h>
+#include <stdio.h>
+#include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <errno.h>
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
@@ -29,6 +34,8 @@ using afs::HelloReply;
 using afs::FileSystem;
 using afs::FileSystemMakedirRequest;
 using afs::FileSystemRemovedirRequest;
+using afs::FileSystemFetchRequest;
+using afs::FileSystemStoreRequest;
 using afs::FileSystemStatRequest;
 using afs::FileSystemStatResponse;
 using afs::FileSystemResponse;
@@ -48,7 +55,9 @@ class GreeterServiceImpl final : public Greeter::Service {
 };
 
 class FileSystemImpl final : public FileSystem::Service {
-
+ public:
+  FileSystemImpl(std::string target_dir_path): target_dir_path_(target_dir_path) {}
+ private:
   Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
     FileSystemReaddirResponse *reply) override {
       // TODO this is a mock
@@ -118,12 +127,39 @@ class FileSystemImpl final : public FileSystem::Service {
 
     return Status::OK;
   }
+  Status Fetch(ServerContext* context, const FileSystemFetchRequest *request,
+                  FileSystemResponse *reply) override {
+    std::string path = serverPath(request->path());
+    int size = request->size();
+    int offset = request->offset();
+    std::string* data = reply->mutable_data();
+    if (size < 0) {
+      size = 64*1024*1024; // 64 MB default file size if not specified.
+    }
+    data->reserve(size+1);
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd == -1) {
+      reply->set_status(fd);
+    } else {
+      int res = pread(fd, data, size, offset);
+      reply->set_status(res);
+    }
+    return Status::OK;
+  }
+  Status Store(ServerContext* context, const FileSystemStoreRequest *request,
+                  FileSystemResponse *reply) override {
+    return Status::OK;
+  }
+  std::string serverPath(const std::string& relative_path) {
+    return target_dir_path_ + "/" + relative_path;
+  }
+  std::string target_dir_path_;
 };
 
 void RunServer(const std::string& targetdir) {
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
-  FileSystemImpl afs_service;
+  FileSystemImpl afs_service(targetdir);
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
