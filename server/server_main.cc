@@ -57,17 +57,39 @@ class GreeterServiceImpl final : public Greeter::Service {
 };
 
 class FileSystemImpl final : public FileSystem::Service {
- public:
-  FileSystemImpl(std::string target_dir_path): target_dir_path_(target_dir_path) {}
- private:
-  Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
-    FileSystemReaddirResponse *reply) override {
-      std::string path = serverPath(request->path());
-      // TODO this is a mock
-      reply->add_filename("test_file");
-      reply->add_filename("test_directory");
+private:
+  // The root of the filesystem on our local filesystem
+  std::string root_;
 
+public:
+  FileSystemImpl(std::string root) : FileSystem::Service(), root_(root) {}
+
+  Status Readdir(ServerContext* context, const FileSystemReaddirRequest* request,
+        FileSystemReaddirResponse *reply) override {
+    std::string path = serverPath(request->path());
+    DIR *dirp;
+    struct dirent *dp;
+
+    if ((dirp = opendir(path.c_str())) == NULL) {
+      reply->set_status(errno);
       return Status::OK;
+    }
+
+    errno = 0;
+    while (true) {
+      dp = readdir(dirp);
+      if (dp == NULL)
+        break;
+
+      // For now . and .. are causing issues with ls, so ignore them
+      // It looks like the need READDIRPLUS implemented
+      if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0)
+        reply->add_filename(dp->d_name);
+    }
+
+    reply->set_status(errno);
+
+    return Status::OK;
   }
 
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
@@ -177,15 +199,15 @@ class FileSystemImpl final : public FileSystem::Service {
     return Status::OK;
   }
   std::string serverPath(const std::string& relative_path) {
-    return target_dir_path_ + "/" + relative_path;
+    return root_ + "/" + relative_path;
   }
-  std::string target_dir_path_;
 };
 
-void RunServer(const std::string& targetdir) {
+
+void RunServer(std::string root) {
   std::string server_address("0.0.0.0:50051");
   GreeterServiceImpl service;
-  FileSystemImpl afs_service(targetdir);
+  FileSystemImpl afs_service(root);
 
   grpc::EnableDefaultHealthCheckService(true);
   grpc::reflection::InitProtoReflectionServerBuilderPlugin();
