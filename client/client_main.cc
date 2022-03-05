@@ -355,7 +355,7 @@ class FileSystemClient {
                 printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Fetch", retry_times++);
                 usleep(request_retry_gap_ms * 1000);
                 ClientContext context1;
-                status = stub_->Fetch(&context1, request, &response);
+                status = stub_->Fetch(&context1, request, response);
             }
 
             if (status.ok()) {
