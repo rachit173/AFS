@@ -340,6 +340,24 @@ static char *get_cache_version_name(const char *path) {
 }
 
 /**
+ * Compare timestamp 1 and timestamp 2.
+ * If timestamp 1 is newer, return 1
+ * If timestamp 2 is newer, return 2
+ * If equal return 0
+ */
+static int time_cmp(struct timespec time1, struct timespec time2) {
+    if (time1.tv_sec > time2.tv_sec) {
+        return 1;
+    } else if (time1.tv_sec == time2.tv_sec) {
+        if (time1.tv_nsec > time2.tv_nsec) return 1;
+        else if (time1.tv_nsec == time2.tv_nsec) return 0;
+        else return 2;
+    } else {
+        return 2;
+    }
+}
+
+/**
  * Make an rpc call to check if the cache for path is valid
  * Return 1 if valid, 0 for invalid, negative for errors
  */
@@ -361,11 +379,14 @@ static int is_cache_valid(const char *path) {
     free(cached_file_version); 
 
     // compare the last modified time
-    // TODO need to compare nano second
-    if (st_server_file.st_mtime <= st_cache_version.st_mtime) {
-        return 1;    
+    int ret = time_cmp(st_server_file.st_mtim, st_cache_version.st_mtim);
+    if (ret == 1) {
+        // server has a newer version
+        return 0;
+    } else {
+        // client has a newer or equivalent version
+        return 1;
     }
-    return 0;
 }
 
 /**
@@ -393,12 +414,14 @@ static int is_cache_dirty(const char *path) {
     free(cached_file_version); 
 
     // compare the last modified time
-    // TODO need to compare nano second too
-    if (st_cache.st_mtime > st_cache_version.st_mtime) {
+    int ret = time_cmp(st_cache.st_mtim, st_cache_version.st_mtim);
+    if (ret == 1) {
+        // cache is dirty
         return 1;
+    } else {
+        // cache is not dirty
+        return 0;
     }
-
-    return 0;
 }
 
 /**
@@ -733,7 +756,8 @@ static int afs_write(const char *path, const char *buf, size_t size,
  */
 static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
-    if (is_cache_dirty(path) == 1) {
+    int ret = is_cache_dirty(path);
+    if (ret == 1) {
         // only flush to server if the file is dirty
         // call the server call store
         char *cache_name = get_cache_name(path);
@@ -750,6 +774,8 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         
         FileSystemClient client(channel);
         if (client.store(path, data) < 0) return -errno;
+    } else if (0 > ret){
+        return ret;
     }
 
 	return 0;
