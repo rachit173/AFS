@@ -185,7 +185,8 @@ public:
     reply->set_uid(buf.st_uid);
     reply->set_gid(buf.st_gid);
     reply->set_size(buf.st_size);
-    reply->set_isdir(S_ISDIR(buf.st_mode));
+    reply->set_mode(buf.st_mode);
+    reply->set_nlink(buf.st_nlink);
 
     lastAccess = reply->mutable_lastaccess();
     lastModification = reply->mutable_lastmodification();

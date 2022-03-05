@@ -249,24 +249,22 @@ class FileSystemClient {
     private:
         std::unique_ptr<FileSystem::Stub> stub_;
         void populateStatStruct(FileSystemStatResponse reply, struct stat *st) {
-            timespec atime, mtime;
+            timespec atime, mtime, ctime;
             atime.tv_sec = reply.lastaccess().sec();
             atime.tv_nsec = reply.lastaccess().nsec();
             mtime.tv_sec = reply.lastmodification().sec();
             mtime.tv_nsec = reply.lastmodification().nsec();
+            ctime.tv_sec = reply.laststatuschange().sec();
+            ctime.tv_nsec = reply.laststatuschange().nsec();
             
             st->st_uid = reply.uid();
             st->st_gid = reply.gid(); // group of the file
             st->st_atim = atime; // last access time
             st->st_mtim = mtime; // last modification time
+            st->st_ctim = ctime; // last status change time
             st->st_size = reply.size();
-            if (reply.isdir()) {
-                // specify the file as directroy and set permission bit
-                st->st_mode = S_IFDIR | 0777;
-            } else {// a file
-                // specify the file as normal file and set permission bit
-                st->st_mode = S_IFREG | 0777;
-            }
+            st->st_mode = reply.mode();
+            st->st_nlink = reply.nlink();
         }
 };
 
