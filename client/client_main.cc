@@ -505,12 +505,12 @@ static int afs_mkdir(const char *path, mode_t mode)
     if (-1 == client.mkdir(path)){
         return -errno;
     }
-
+/*
     // mkdir locally
     std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
     res = mkdir(cachePath.c_str(), mode);
     if (res == -1)
-        return -errno;
+        return -errno;*/
 
     return 0;
 }
@@ -524,11 +524,12 @@ static int afs_unlink(const char *path)
 
     // unlink cache copy
     std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
+    std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + "/" + std::string(path);
+
     res = unlink(cachePath.c_str());
+    res = unlink(cacheVersionPath.c_str());
     // Don't error out if the cached copy doesn't exist because we might want
     // to still delete a file if we don't have it cached.
-//    if (res == -1)
-//        return -errno;
 
     // server-side
     FileSystemClient client(channel);
@@ -545,12 +546,6 @@ static int afs_unlink(const char *path)
 static int afs_rmdir(const char *path)
 {
     int res;
-
-    // rmdir locally
-    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-    res = rmdir(cachePath.c_str());
-//    if (res == -1)
-//        return -errno;
 
     // server-side
     FileSystemClient client(channel);
@@ -575,9 +570,8 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
     std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
     std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
     res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
+    // No error check
     // We may still want to rename the file even if we don't have it in the cache
-//    if (res == -1)
-//        return -errno;
 
     // server-side
     FileSystemClient client(channel);
