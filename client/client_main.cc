@@ -69,6 +69,8 @@ using afs::FileSystemStoreResponse;
 #define CACHE_TMP_DIR "/tmp/afs_prototype_tmp"
 #define CACHE_VERSION_DIR "/tmp/afs_prototype.version_file"
 enum file_type{File, Directory};
+long request_retry_limit = 10;
+long request_retry_gap_ms = 1000;
 static std::shared_ptr<Channel> channel;
 
 struct dir_structure {
@@ -87,6 +89,15 @@ class FileSystemClient {
             FileSystemStatResponse reply;
             ClientContext context;
             Status status = stub_->Stat(&context, request, &reply);
+
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Stat", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Stat(&context1, request, &reply);
+            }
         
             if (status.ok()) {
                 if (reply.status() == 0){
@@ -111,12 +122,17 @@ class FileSystemClient {
             request.set_path(path); 
             FileSystemReaddirResponse reply;
             ClientContext context;
-            struct dir_structure *dir = (struct dir_structure *) calloc(1, sizeof(struct dir_structure));
-            char **file_list;
 
             Status status = stub_->Readdir(&context, request, &reply);
-            file_list =
-                (char **)calloc(reply.filename_size(), sizeof(char *));
+
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Readdir", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Readdir(&context1, request, &reply);
+            }
 
             // handle server response.
             if (status.ok()) {
@@ -126,6 +142,9 @@ class FileSystemClient {
                     errno = reply.status();
                     return NULL;
                 }
+
+                struct dir_structure *dir = (struct dir_structure *) calloc(1, sizeof(struct dir_structure));
+                char **file_list = (char **)calloc(reply.filename_size(), sizeof(char *));
 
                 for (int i = 0; i < reply.filename_size(); i++) {
                     const char *fileName = reply.filename(i).c_str();
@@ -150,7 +169,20 @@ class FileSystemClient {
 
             Status status = stub_->Makedir(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Makedir", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Makedir(&context1, request, &response);
+            }
+
             if (status.ok()) {
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
                 return 1;
             } else {
                 errno = ETIMEDOUT;
@@ -166,7 +198,20 @@ class FileSystemClient {
 
             Status status = stub_->Remove(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Remove", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Remove(&context1, request, &response);
+            }
+
             if (status.ok()) {
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
                 return 1;
             } else {
                 errno = ETIMEDOUT;
@@ -182,8 +227,21 @@ class FileSystemClient {
 
             Status status = stub_->Removedir(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Removedir", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Removedir(&context1, request, &response);
+            }
+
             if (status.ok()) {
-                return -response.status();
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
+                return 1;
             } else {
                 errno = ETIMEDOUT;
                 return -1;
@@ -199,8 +257,21 @@ class FileSystemClient {
 
             Status status = stub_->Rename(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Rename", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Rename(&context1, request, &response);
+            }
+
             if (status.ok()) {
-                return response.status();
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
+                return 1;
             } else {
                 errno = ETIMEDOUT;
                 return -1;
@@ -216,8 +287,21 @@ class FileSystemClient {
 
             Status status = stub_->Create(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Create", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Create(&context1, request, &response);
+            }
+
             if (status.ok()) {
-                return response.status();
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
+                return 1;
             } else {
                 errno = ETIMEDOUT;
                 return -1;
@@ -234,9 +318,21 @@ class FileSystemClient {
 
             Status status = stub_->Store(&context, request, &response);
 
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Store", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Store(&context1, request, &response);
+            }
+
             if (status.ok()) {
-                errno = response.status();
-                return errno;
+                if (response.status() != 0) {
+                  errno = response.status();
+                  return -1;
+                }
+                return 1;
             } else {
                 errno = ETIMEDOUT;
                 return -1;
@@ -252,6 +348,15 @@ class FileSystemClient {
             ClientContext context;
 
             Status status = stub_->Fetch(&context, request, response);
+
+            // retry until limit
+            long retry_times = 1;
+            while (!status.ok() && retry_times <= request_retry_limit) {
+                printf("===============gRPC request '%s' failed, retry (%ld)...\n", "Fetch", retry_times++);
+                usleep(request_retry_gap_ms * 1000);
+                ClientContext context1;
+                status = stub_->Fetch(&context1, request, &response);
+            }
 
             if (status.ok()) {
                 if (response->status() != 0) {
@@ -619,6 +724,8 @@ static int afs_getattr(const char *path, struct stat *stbuf,
 
     FileSystemClient client(channel);
     if (client.getStat(path, stbuf) < 0){
+      printf("AAAAA");
+
         return -errno;
     }
 
