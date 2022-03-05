@@ -84,7 +84,7 @@ public:
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path());
 
-    int ret = creat(path.c_str(), O_CREAT | 0777);
+    int ret = creat(path.c_str(), request->mode());
     if (ret != 0) {
       ret = errno;
     }
@@ -114,6 +114,7 @@ public:
     std::string path = serverPath(request->path());
     DIR *dirp;
     struct dirent *dp;
+    errno = 0;
 
     if ((dirp = opendir(path.c_str())) == NULL) {
       reply->set_status(errno);

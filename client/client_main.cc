@@ -93,11 +93,11 @@ class FileSystemClient {
                     // reply
                     return 0;
                 } else {
-                    return -reply.status();
+                    errno = reply.status();
+                    return -1;
                 }
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                        << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -119,6 +119,13 @@ class FileSystemClient {
 
             // handle server response.
             if (status.ok()) {
+
+                // check for server side function call error
+                if (reply.status() != 0) {
+                    errno = reply.status();
+                    return NULL;
+                }
+
                 for (int i = 0; i < reply.filename_size(); i++) {
                     const char *fileName = reply.filename(i).c_str();
                     file_list[i] = (char *)calloc(1, strlen(fileName) + 1);
@@ -129,8 +136,7 @@ class FileSystemClient {
                 dir->length = reply.filename_size();
                 return dir;
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                    << std::endl;
+                errno = ETIMEDOUT;
                 return NULL;
             }
         }
@@ -146,8 +152,7 @@ class FileSystemClient {
             if (status.ok()) {
                 return 1;
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -163,8 +168,7 @@ class FileSystemClient {
             if (status.ok()) {
                 return 1;
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -180,8 +184,7 @@ class FileSystemClient {
             if (status.ok()) {
                 return -response.status();
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -198,15 +201,15 @@ class FileSystemClient {
             if (status.ok()) {
                 return response.status();
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
 
-        int create(const char *path) {
+        int create(const char *path, mode_t mode) {
             FileSystemCreateRequest request;
             request.set_path(path);
+            request.set_mode(mode);
             FileSystemResponse response;
             ClientContext context;
 
@@ -215,8 +218,7 @@ class FileSystemClient {
             if (status.ok()) {
                 return response.status();
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -231,10 +233,10 @@ class FileSystemClient {
             Status status = stub_->Store(&context, request, &response);
 
             if (status.ok()) {
-                return response.status();
+                errno = response.status();
+                return errno;
             } else {
-                std::cout << status.error_code() << ": " << status.error_message()
-                          << std::endl;
+                errno = ETIMEDOUT;
                 return -1;
             }
         }
@@ -359,6 +361,7 @@ static int is_cache_valid(const char *path) {
     free(cached_file_version); 
 
     // compare the last modified time
+    // TODO need to compare nano second
     if (st_server_file.st_mtime <= st_cache_version.st_mtime) {
         return 1;    
     }
@@ -384,15 +387,17 @@ static int is_cache_dirty(const char *path) {
     // where the last modified time is the version timestamp of the cache
     char *cached_file_version = get_cache_version_name(path);
     if (-1 == lstat(cached_file_version, &st_cache_version)) {
-        free(cached_file_version); 
+        free(cached_file_version);
 		return -errno;
     }
     free(cached_file_version); 
 
     // compare the last modified time
+    // TODO need to compare nano second too
     if (st_cache.st_mtime > st_cache_version.st_mtime) {
         return 1;
     }
+
     return 0;
 }
 
@@ -457,16 +462,9 @@ static int afs_getattr(const char *path, struct stat *stbuf,
 {
     (void) fi;
 
-    int ret;
     FileSystemClient client(channel);
-    if ((ret = client.getStat(path, stbuf)) < 0){
-        return ret;
-    }
-
-    // If the stated path is a directory, cache it
-    if (S_ISDIR(stbuf->st_mode)) {
-        std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-        mkdir(cachePath.c_str(), stbuf->st_mode);
+    if (client.getStat(path, stbuf) < 0){
+        return -errno;
     }
 
     return 0;
@@ -480,6 +478,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
     FileSystemClient client(channel);
     struct dir_structure *dir_entries = client.readDir(path);
+    printf("error code is %d", errno);
     if (NULL == dir_entries){
 		return -errno;
     }
@@ -497,7 +496,7 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 }
 
 /**
- * Make a directory on both server and cache.
+ * Make a directory on server
  */
 static int afs_mkdir(const char *path, mode_t mode)
 {
@@ -508,12 +507,6 @@ static int afs_mkdir(const char *path, mode_t mode)
     if (-1 == client.mkdir(path)){
         return -errno;
     }
-/*
-    // mkdir locally
-    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-    res = mkdir(cachePath.c_str(), mode);
-    if (res == -1)
-        return -errno;*/
 
     return 0;
 }
@@ -544,7 +537,7 @@ static int afs_unlink(const char *path)
 }
 
 /**
- * Remove a directory on both server and cache.
+ * Remove a directory on server
  */
 static int afs_rmdir(const char *path)
 {
@@ -552,8 +545,8 @@ static int afs_rmdir(const char *path)
 
     // server-side
     FileSystemClient client(channel);
-    if ((res = client.rmdir(path)) < 0){
-       return res;
+    if (client.rmdir(path) < 0){
+       return -errno;
     }
 
     return 0;
@@ -593,7 +586,11 @@ static int afs_create(const char *path, mode_t mode,
 {
     int res;
 
-    mode |= O_CREAT;
+    // create file on server-side
+    FileSystemClient client(channel);
+    if (0 > client.create(path, mode)){
+        return -errno;
+    }
 
     // create cache copy
     std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
@@ -603,13 +600,8 @@ static int afs_create(const char *path, mode_t mode,
 
     fi->fh = res;
 
-    // server-side
     // TODO will need to create the version file too, where the last_modfied time stamp is 
     // retrived from the server. 
-    FileSystemClient client(channel);
-    if (-1 == client.create(path)){
-        return -errno;
-    }
 
     return 0;
 }
@@ -680,12 +672,11 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
 }
 
 /*
- * Read from a file's cached copy, need to check valid first TODO
+ * Read from a file's cached copy.
  */
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-    printf("============read file %s\n", path);
 	int fd;
 	int res;
     char *cache_name = get_cache_name(path);
@@ -709,8 +700,7 @@ static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 }
 
 /*
- * Write to the temporary file of the cached copy.
- * If no cached copy exist it should retrieve a copy from the server. TODO
+ * Write to the the cached copy
  */
 static int afs_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
@@ -739,13 +729,11 @@ static int afs_write(const char *path, const char *buf, size_t size,
 }
 
 /**
- * File flushed to server on close is the cache has been modified. TODO
+ * File flushed to server on close if the cache has been modified
  */
 static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
-    printf("============flush file %s\n", path);
     if (is_cache_dirty(path) == 1) {
-        printf("============file is dirty %s\n", path);
         // only flush to server if the file is dirty
         // call the server call store
         char *cache_name = get_cache_name(path);
@@ -761,8 +749,9 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         fread(data, sizeof(char), size, f);
         
         FileSystemClient client(channel);
-        client.store(path, data);
+        if (client.store(path, data) < 0) return -errno;
     }
+
 	return 0;
 }
 
