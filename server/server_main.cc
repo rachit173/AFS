@@ -261,24 +261,49 @@ public:
     close(fd);
     return Status::OK;
   }
+
   Status Store(ServerContext* context, const FileSystemStoreRequest *request,
                   FileSystemStoreResponse *reply) override {
     std::string path = serverPath(request->path());
     std::string data = request->data();
+    std::string tmp_path = path + ".tmp";
+    int res;
     errno = 0;
-    int fd = open(path.c_str(), O_WRONLY);
 
+    // First, write the changes to a temporary file
+    int fd = open(tmp_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0777);
     if (fd == -1) {
       reply->set_status(errno);
-    } else {
-      std::cout << request->data().size() << std::endl;
-      int res = pwrite(fd, data.c_str(), request->data().size(), 0);
-      reply->set_status(errno);
+      return Status::OK;
     }
 
+    std::cout << request->data().size() << std::endl;
+    res = write(fd, data.c_str(), request->data().size());
+    if (res == -1) {
+      reply->set_status(errno);
+      return Status::OK;
+    }
+
+    // Make sure the write is persisted
+    res = fsync(fd);
+    if (res == -1) {
+      reply->set_status(errno);
+      return Status::OK;
+    }
     close(fd);
+
+    // Rename the tmp file to the actual file to commit the changes
+    res = rename(tmp_path.c_str(), path.c_str());
+    if (res == -1) {
+      reply->set_status(errno);
+      return Status::OK;
+    }
+
+    reply->set_status(0);
+
     return Status::OK;
   }
+
   std::string serverPath(const std::string& relative_path) {
     return root_ + "/" + relative_path;
   }

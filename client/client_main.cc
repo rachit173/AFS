@@ -860,10 +860,12 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         }
         ret = write(fd, response.data().c_str(), response.size());
         if (ret == -1) {
+            close(fd);
             return -errno;
         }
         ret = fsync(fd);
         if (ret == -1) {
+            close(fd);
             return -errno;
         }
         close(fd);
