@@ -265,6 +265,11 @@ class FileSystemClient {
             st->st_size = reply.size();
             st->st_mode = reply.mode();
             st->st_nlink = reply.nlink();
+            st->st_dev = reply.dev();
+            st->st_rdev = reply.rdev();
+            st->st_ino = reply.inodenum();
+            st->st_blksize = reply.blksize();
+            st->st_blocks = reply.blocksnum();
         }
 };
 

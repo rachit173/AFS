@@ -75,6 +75,11 @@ message FileSystemStatResponse {
   TimeSpec lastAccess = 7;
   TimeSpec lastModification = 8;
   TimeSpec lastStatusChange = 9;
+  int32 dev = 10;
+  int32 rdev = 11;
+  uint32 inodeNum = 12;
+  uint32 blksize = 13;
+  uint32 blocksNum = 14;
 }
 
 message FileSystemReaddirResponse {

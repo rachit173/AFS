@@ -187,6 +187,11 @@ public:
     reply->set_size(buf.st_size);
     reply->set_mode(buf.st_mode);
     reply->set_nlink(buf.st_nlink);
+    reply->set_dev(buf.st_dev);
+    reply->set_rdev(buf.st_rdev);
+    reply->set_inodenum(buf.st_ino);
+    reply->set_blksize(buf.st_blksize);
+    reply->set_blocksnum(buf.st_blocks);
 
     lastAccess = reply->mutable_lastaccess();
     lastModification = reply->mutable_lastmodification();
