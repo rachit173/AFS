@@ -71,6 +71,7 @@ public:
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path().c_str());
 
+    errno = 0;
     int ret = unlink(path.c_str());
     if (ret != 0)
       ret = errno;
@@ -84,7 +85,8 @@ public:
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path());
 
-    int ret = creat(path.c_str(), request->mode());
+    errno = 0;
+    int ret = creat(path.c_str(), 0777);
     if (ret != 0) {
       ret = errno;
     }
@@ -99,6 +101,7 @@ public:
     std::string fromPath = serverPath(request->frompath());
     std::string toPath = serverPath(request->topath());
 
+    errno = 0;
     int ret = rename(fromPath.c_str(), toPath.c_str());
     if (ret != 0) {
       ret = errno;
@@ -121,7 +124,6 @@ public:
       return Status::OK;
     }
 
-    errno = 0;
     while (true) {
       dp = readdir(dirp);
       if (dp == NULL)
@@ -140,6 +142,7 @@ public:
   Status Makedir(ServerContext* context, const FileSystemMakedirRequest* request,
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path());
+    errno = 0;
     int ret = mkdir(path.c_str(), 0777);
 
     //Mkdir return -1 on error and sets errno to error code
@@ -155,6 +158,7 @@ public:
   Status Removedir(ServerContext* context, const FileSystemRemovedirRequest *request,
                   FileSystemResponse *reply) override {
     std::string path = serverPath(request->path());
+    errno = 0;
     int ret = rmdir(path.c_str());
 
     //rmdir returns -1 on error and sets errno
@@ -175,6 +179,7 @@ public:
     TimeSpec *lastModification;
     TimeSpec *lastStatusChange;
     struct stat buf;
+    errno = 0;
     int ret = stat(path.c_str(), &buf);
 
     // returns -1 on error and sets errno
@@ -213,6 +218,7 @@ public:
     int ret;
     std::string path = serverPath(request->path());
     char *buf;
+    errno = 0;
 
     // Find out how big the file is
     ret = stat(path.c_str(), &statbuf);
@@ -259,7 +265,9 @@ public:
                   FileSystemStoreResponse *reply) override {
     std::string path = serverPath(request->path());
     std::string data = request->data();
+    errno = 0;
     int fd = open(path.c_str(), O_WRONLY);
+
     if (fd == -1) {
       reply->set_status(errno);
     } else {

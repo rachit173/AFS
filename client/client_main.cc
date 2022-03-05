@@ -376,6 +376,45 @@ static int time_cmp(struct timespec time1, struct timespec time2) {
 }
 
 /**
+ * Create a file at given path and all of its parent directory if not exist
+ * Return file descriptor
+ * Return -1 on error and sets errno
+ */
+static int create_file_with_dir(const char* path, mode_t mode) {
+    int fd = creat(path, mode);
+    if (fd == -1) return -1;
+    return 1;
+}
+
+static int create_cache_version(const char* path, time_t sec, time_t nsec) {
+    char *cache_version_name = get_cache_version_name(path);
+
+    printf("about to create a version for a cache. Cache version name is %s\n", cache_version_name);
+
+    // If the cache version file does not exist, create it
+    int ret = access(cache_version_name, F_OK);
+    if (ret == -1 && errno == ENOENT) {
+        int fd = create_file_with_dir(cache_version_name, 0777);
+        if (fd == -1) {
+            return -errno;
+        }
+        close(fd);
+    } else if (ret == -1) {
+        return -errno;
+    }
+
+    struct timespec times[2];
+    times[0].tv_sec = times[1].tv_sec = sec;
+    times[0].tv_nsec = times[1].tv_nsec = nsec;
+    ret = utimensat(0, cache_version_name, times, 0);
+    free(cache_version_name);
+    if (ret == -1) {
+        return -errno;
+    }
+    return 1;
+}
+
+/**
  * Make an rpc call to check if the cache for path is valid
  * Return 1 if valid, 0 for invalid, negative for errors
  */
@@ -560,8 +599,8 @@ static int afs_unlink(const char *path)
     int res;
 
     // unlink cache copy
-    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-    std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + "/" + std::string(path);
+    std::string cachePath = std::string(CACHE_DIR) + std::string(path);
+    std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
 
     res = unlink(cachePath.c_str());
     res = unlink(cacheVersionPath.c_str());
@@ -604,8 +643,8 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
       return -EINVAL;
 
     // rename cache copy
-    std::string cacheFromPath = std::string(CACHE_DIR) + "/" + std::string(from);
-    std::string cacheToPath = std::string(CACHE_DIR) + "/" + std::string(to);
+    std::string cacheFromPath = std::string(CACHE_DIR) + std::string(from);
+    std::string cacheToPath = std::string(CACHE_DIR) + std::string(to);
     res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
     // No error check
     // We may still want to rename the file even if we don't have it in the cache
@@ -625,24 +664,40 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
 static int afs_create(const char *path, mode_t mode,
 		      struct fuse_file_info *fi)
 {
-    int res;
+    int ret;
 
     // create file on server-side
     FileSystemClient client(channel);
     if (0 > client.create(path, mode)){
+        printf("CREATE: =============4errono returned%d\n", -errno);
         return -errno;
     }
 
     // create cache copy
-    std::string cachePath = std::string(CACHE_DIR) + "/" + std::string(path);
-    res = open(cachePath.c_str(), fi->flags, mode);
-    if (res == -1)
+    std::string cachePath = std::string(CACHE_DIR) + std::string(path);
+    unlink(cachePath.c_str());
+    ret = creat(cachePath.c_str(), 0777);
+    if (ret == -1) {
+        printf("CREATE: =============3errono returned%d\n", -errno);
         return -errno;
+    }
 
-    fi->fh = res;
+    fi->fh = ret;
 
-    // TODO will need to create the version file too, where the last_modfied time stamp is 
-    // retrived from the server. 
+    // create the version file
+    struct stat st;
+    if (client.getStat(path, &st) < 0){
+        printf("CREATE: =============2errono returned%d\n", -errno);
+        return -errno;
+    }
+    if (0 > (
+            ret = create_cache_version(
+                path,
+                st.st_mtim.tv_sec,
+                st.st_mtim.tv_nsec))) {
+        printf("CREATE: =============1errono returned%d\n", ret);
+        return ret;
+    }
 
     return 0;
 }
@@ -661,16 +716,30 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
     int ret;
 
     if(access(cache_name, F_OK ) == 0) {
-        // file exists
+        // cache file exists
         int ret = is_cache_valid(path);
         printf("============is cache valid %d\n", ret);
         if (1 == ret) {
             get_new_file = 0;
+            /*
+            if (fi->flags && (O_CREAT || O_EXCL)) {
+                // if the file already exist on server, but this two flags are set
+                // TODO need to check for case when the server has the file but local cache has not
+                return -EEXIST;
+            }*/
         } else if (0 > ret) {
-            // TODO Need to deal with the case when the file does not exist on server
-            // remove the cached file and return error
-            // mock don't get new file for now
-            get_new_file = 0;
+            /*
+            if (fi->flags && O_CREAT) {
+                return afs_create(path, 0777, fi);
+            }*/
+
+            // unlink cache copy
+            std::string cachePath = std::string(CACHE_DIR) + std::string(path);
+            std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
+
+            unlink(cachePath.c_str());
+            unlink(cacheVersionPath.c_str());
+            return -ENOENT;
         }
     }
 
@@ -680,7 +749,6 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // flags should also be passed to the server(?)
         // If there is any error the errono should be returned
         printf("============file %s is retrived from the server\n", path);
-        char *cache_version_name;
         afs::FileSystemFetchResponse response;
         FileSystemClient client(channel);
 
@@ -716,35 +784,19 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // This should be safe to do unatomically because if this
         // crashes before we update the modtime, we will just use
         // the old modtime which should be older
-        cache_version_name = get_cache_version_name(path);
-
-        // If the cache version file does not exist, create it
-        ret = access(cache_version_name, F_OK);
-        if (ret == -1 && errno == ENOENT) {
-            fd = open(cache_version_name, O_CREAT | O_WRONLY, 0777);
-            if (fd == -1) {
-                return -errno;
-            }
-            close(fd);
-        } else if (ret == -1) {
-            return -errno;
+        if (0 > (
+            ret = create_cache_version(
+                path,
+                response.lastmodification().sec(),
+                response.lastmodification().nsec()))) {
+            return ret;
         }
-
-        struct timespec times[2];
-        times[0].tv_sec = times[1].tv_sec = response.lastmodification().sec();
-        times[0].tv_nsec = times[1].tv_nsec = response.lastmodification().nsec();
-        ret = utimensat(0, cache_version_name, times, 0);
-        if (ret == -1) {
-            return -errno;
-        }
-        free(cache_version_name);
     }
 
 	int res;
 	res = open(cache_name, fi->flags);
     free(cache_name);
-	if (res == -1)
-		return -errno;
+	if (res == -1) return -errno;
 
 	fi->fh = res;
 	return 0;
@@ -787,6 +839,7 @@ static int afs_write(const char *path, const char *buf, size_t size,
 	int fd;
 	int res;
     char *cache_name = get_cache_name(path);
+    printf("======write %s to cache \n", buf);
 
 	(void) fi;
 	if(fi == NULL)
@@ -825,6 +878,7 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         size_t size = ftell(f);
 
         char* data = new char[size];
+        printf("======flush data %s to server \n", data);
         rewind(f);
         fread(data, sizeof(char), size, f);
         
