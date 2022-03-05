@@ -266,6 +266,7 @@ public:
                   FileSystemStoreResponse *reply) override {
     std::string path = serverPath(request->path());
     std::string data = request->data();
+    uint32_t size = request->size();
     std::string tmp_path = path + ".tmp";
     int res;
     errno = 0;
@@ -277,8 +278,8 @@ public:
       return Status::OK;
     }
 
-    std::cout << request->data().size() << std::endl;
-    res = write(fd, data.c_str(), request->data().size());
+    std::cout << size << std::endl;
+    res = write(fd, data.c_str(), size);
     if (res == -1) {
       reply->set_status(errno);
       return Status::OK;

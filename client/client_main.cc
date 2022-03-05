@@ -224,10 +224,11 @@ class FileSystemClient {
             }
         }
 
-        int store(const char *path, const char *data) {
+        int store(const char *path, const char *data, uint32_t size) {
             FileSystemStoreRequest request;
             request.set_path(path);
             request.set_data(data);
+            request.set_size(size);
             FileSystemStoreResponse response;
             ClientContext context;
 
@@ -934,7 +935,7 @@ static int afs_write(const char *path, const char *buf, size_t size,
 	int fd;
 	int res;
     char *cache_name = get_cache_name(path);
-    printf("======write %s to cache \n", buf);
+    printf("======write %s to cache size: %ld\n", buf, size);
 
 	(void) fi;
 	if(fi == NULL)
@@ -972,13 +973,19 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         fseek(f, 0, SEEK_END);
         size_t size = ftell(f);
 
+        if (size > 0xFFFFFFFF) {
+            fclose(f);
+            return -ENOMEM;
+        }
+
         char* data = new char[size];
-        printf("======flush data %s to server \n", data);
         rewind(f);
         fread(data, sizeof(char), size, f);
-        
+        printf("======flush data %s to server \n", data);
+        fclose(f);
+
         FileSystemClient client(channel);
-        if (client.store(path, data) < 0) return -errno;
+        if (client.store(path, data, size) < 0) return -errno;
     } else if (0 > ret){
         return ret;
     }

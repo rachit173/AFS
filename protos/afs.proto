@@ -106,7 +106,8 @@ message FileSystemFetchResponse {
 
 message FileSystemStoreRequest {
   string path = 1;
-  string data = 2;
+  bytes data = 2;
+  uint32 size = 3;
 }
 
 message FileSystemStoreResponse {
