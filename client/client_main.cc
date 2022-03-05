@@ -66,6 +66,7 @@ using afs::FileSystemStoreRequest;
 using afs::FileSystemStoreResponse;
 
 #define CACHE_DIR "/tmp/afs_prototype"
+#define CACHE_TMP_DIR "/tmp/afs_prototype_tmp"
 #define CACHE_VERSION_DIR "/tmp/afs_prototype.version_file"
 enum file_type{File, Directory};
 static std::shared_ptr<Channel> channel;
@@ -330,6 +331,69 @@ class GreeterClient {
 };
 
 /**
+ * Remove the original entry at a diven path, regardless what it is
+ * Return -1 and set errno on error
+ */
+static int remove_identifier(const char *path) {
+    printf("===============about to remove path %s\n", path);
+    struct stat stat;
+    if (-1 == lstat(path, &stat)) {
+        if (errno == ENOENT || errno == ENOTDIR) return 0;
+        return -1;
+    } 
+    int ret;
+    
+    if (S_ISREG(stat.st_mode)) {
+        ret = unlink(path);
+    } else {
+        const char cmd_perfix[] = "rm -rf ";
+        char cmd[strlen(path) + strlen(cmd_perfix) + 1];
+        strncpy(cmd, cmd_perfix, strlen(cmd_perfix));
+        cmd[strlen(cmd_perfix)] = '\0';
+        strcat(cmd, path);
+        printf("===============command %s is about being executed\n", cmd);
+
+        ret = system(cmd);
+    }
+
+    return ret;
+}
+
+/**
+ * Given a path of a file, and create all of its parent directories
+ */
+static int create_parent_directories(const char *path) {
+    char tmp[strlen(path) + 1];
+    char prefix[strlen(path) + 1];
+    prefix[0] = '/';
+    prefix[1] = '\0';
+    strncpy(tmp, path, strlen(path));
+    tmp[strlen(path)] = '\0';
+
+    char *token;
+    char *next_token;
+    token = strtok(tmp, "/");
+    next_token = strtok(NULL, "/");
+    struct stat st = {0};
+
+    while (NULL != token) {
+        if (next_token != NULL) {// current token is a directory
+            strcat(prefix, token);
+            if (stat(prefix, &st) == -1) { // create the directory if it doesn't exist
+                if (mkdir(prefix, 0777) == -1) return -1;
+            }
+            strcat(prefix, "/");
+            token = next_token;
+            next_token = strtok(NULL, "/");
+        } else {// current token is a file, do nothing
+            token = next_token;
+        }
+    }
+
+    return 0;
+}
+
+/**
  * Get the path of the cache for a given file/directory path
  * The caller needs to free the memory for the return
  */
@@ -375,39 +439,29 @@ static int time_cmp(struct timespec time1, struct timespec time2) {
     }
 }
 
-/**
- * Create a file at given path and all of its parent directory if not exist
- * Return file descriptor
- * Return -1 on error and sets errno
- */
-static int create_file_with_dir(const char* path, mode_t mode) {
-    int fd = creat(path, mode);
-    if (fd == -1) return -1;
-    return 1;
-}
-
 static int create_cache_version(const char* path, time_t sec, time_t nsec) {
     char *cache_version_name = get_cache_version_name(path);
 
     printf("about to create a version for a cache. Cache version name is %s\n", cache_version_name);
 
-    // If the cache version file does not exist, create it
-    int ret = access(cache_version_name, F_OK);
-    if (ret == -1 && errno == ENOENT) {
-        int fd = create_file_with_dir(cache_version_name, 0777);
-        if (fd == -1) {
-            return -errno;
-        }
-        close(fd);
-    } else if (ret == -1) {
-        return -errno;
-    }
+    // to prevent directory and file namd collision
+    // delete any existing entry with the same name
+    remove_identifier(cache_version_name);
+
+    // create new cache version file
+    int ret = create_parent_directories(cache_version_name);
+    if (ret == -1) return -errno;
+    int fd = creat(cache_version_name, 0777);
+    if (fd == -1) return -errno;
+
+    close(fd);
 
     struct timespec times[2];
     times[0].tv_sec = times[1].tv_sec = sec;
     times[0].tv_nsec = times[1].tv_nsec = nsec;
     ret = utimensat(0, cache_version_name, times, 0);
     free(cache_version_name);
+
     if (ret == -1) {
         return -errno;
     }
@@ -503,14 +557,34 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 
     // initialize cache directory if not exist
     DIR* dir = opendir(CACHE_DIR);
+    DIR* tmp_dir = opendir(CACHE_TMP_DIR);
     DIR* meta_dir = opendir(CACHE_VERSION_DIR);
 
     if (dir) {
         closedir(dir);
     } else if (ENOENT == errno) {
         // cache_dir does not exist
-        if (-1 == mkdir(CACHE_DIR, 0700)) {
+        if (-1 == mkdir(CACHE_DIR, 0777)) {
             perror("Failed to initialize cache directory");
+            exit(EXIT_FAILURE);
+        } 
+    } else {
+        perror("Failed to initialize cache directory");
+        exit(EXIT_FAILURE);
+    }
+
+    if (tmp_dir) {
+        //if it exist, recreate the directory
+        closedir(tmp_dir);
+        remove_identifier(CACHE_TMP_DIR);
+        if (-1 == mkdir(CACHE_TMP_DIR, 0777)) {
+            perror("Failed to initialize cache tmp directory");
+            exit(EXIT_FAILURE);
+        } 
+    } else if (ENOENT == errno) {
+        // tmp_dir does not exist
+        if (-1 == mkdir(CACHE_TMP_DIR, 0777)) {
+            perror("Failed to initialize cache tmp directory");
             exit(EXIT_FAILURE);
         } 
     } else {
@@ -522,7 +596,7 @@ static void *afs_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
         closedir(meta_dir);
     } else if (ENOENT == errno) {
         // meta data directory for cache file does not exist
-        if (-1 == mkdir(CACHE_VERSION_DIR, 0700)) {
+        if (-1 == mkdir(CACHE_VERSION_DIR, 0777)) {
             perror("Failed to initialize cache metadata directory");
             exit(EXIT_FAILURE);
         } 
@@ -558,10 +632,8 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
     FileSystemClient client(channel);
     struct dir_structure *dir_entries = client.readDir(path);
-    printf("error code is %d", errno);
-    if (NULL == dir_entries){
-		return -errno;
-    }
+
+    if (NULL == dir_entries) return -errno;
 
     char **file_names = dir_entries->files;
     for (int i = 0; i < dir_entries->length; i++) {
@@ -602,8 +674,8 @@ static int afs_unlink(const char *path)
     std::string cachePath = std::string(CACHE_DIR) + std::string(path);
     std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
 
-    res = unlink(cachePath.c_str());
-    res = unlink(cacheVersionPath.c_str());
+    remove_identifier(cachePath.c_str());
+    remove_identifier(cacheVersionPath.c_str());
     // Don't error out if the cached copy doesn't exist because we might want
     // to still delete a file if we don't have it cached.
 
@@ -629,6 +701,12 @@ static int afs_rmdir(const char *path)
        return -errno;
     }
 
+    // remove the cache if there is any
+    std::string cachePath = std::string(CACHE_DIR) + std::string(path);
+    std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
+    remove_identifier(cachePath.c_str());
+    remove_identifier(cacheVersionPath.c_str());
+
     return 0;
 }
 
@@ -642,10 +720,12 @@ static int afs_rename(const char *from, const char *to, unsigned int flags)
     if (flags)
       return -EINVAL;
 
-    // rename cache copy
+    // clear local cache copy if there is any instead of renaming
+    // this is to make sure the versioning is consistent
     std::string cacheFromPath = std::string(CACHE_DIR) + std::string(from);
-    std::string cacheToPath = std::string(CACHE_DIR) + std::string(to);
-    res = rename(cacheFromPath.c_str(), cacheToPath.c_str());
+    std::string cacheVersionFromPath = std::string(CACHE_VERSION_DIR) + std::string(from);
+    remove_identifier(cacheFromPath.c_str());
+    remove_identifier(cacheVersionFromPath.c_str());
     // No error check
     // We may still want to rename the file even if we don't have it in the cache
 
@@ -673,8 +753,13 @@ static int afs_create(const char *path, mode_t mode,
         return -errno;
     }
 
-    // create cache copy
+    // remove any existing cache with the same name
     std::string cachePath = std::string(CACHE_DIR) + std::string(path);
+    remove_identifier(cachePath.c_str());
+
+    // create new cache copy
+    ret = create_parent_directories(cachePath.c_str());
+    if (ret == -1) return -errno;
     unlink(cachePath.c_str());
     ret = creat(cachePath.c_str(), 0777);
     if (ret == -1) {
@@ -690,6 +775,7 @@ static int afs_create(const char *path, mode_t mode,
         printf("CREATE: =============2errono returned%d\n", -errno);
         return -errno;
     }
+
     if (0 > (
             ret = create_cache_version(
                 path,
@@ -710,7 +796,8 @@ static int afs_create(const char *path, mode_t mode,
 static int afs_open(const char *path, struct fuse_file_info *fi) {
     printf("============open file %s\n", path);
     // check if a cache exist
-    int get_new_file = 1;
+    int cache_is_valid = 0;
+
     char *cache_name = get_cache_name(path);
     int fd;
     int ret;
@@ -719,31 +806,28 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // cache file exists
         int ret = is_cache_valid(path);
         printf("============is cache valid %d\n", ret);
-        if (1 == ret) {
-            get_new_file = 0;
+        if (1 == ret) { // cache is valid and file exist on server
+            cache_is_valid = 1;
             /*
-            if (fi->flags && (O_CREAT || O_EXCL)) {
+            if (fi->flags && (O_CREAT | O_EXCL)) {
                 // if the file already exist on server, but this two flags are set
                 // TODO need to check for case when the server has the file but local cache has not
                 return -EEXIST;
             }*/
         } else if (0 > ret) {
-            /*
-            if (fi->flags && O_CREAT) {
-                return afs_create(path, 0777, fi);
-            }*/
+            // some error happened, either the cache is corrupted or the file is not on server
+            // need to handle the case for creation flag on?
 
             // unlink cache copy
-            std::string cachePath = std::string(CACHE_DIR) + std::string(path);
             std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
-
-            unlink(cachePath.c_str());
-            unlink(cacheVersionPath.c_str());
+            remove_identifier(cache_name);
+            remove_identifier(cacheVersionPath.c_str());
+            free(cache_name);
             return -ENOENT;
         }
     }
 
-    if (get_new_file == 1) {
+    if (cache_is_valid == 0) {
         // retrive a new copy from server, and replcae the cached file TODO
         // create a version file for the cache using the server returned timestamp
         // flags should also be passed to the server(?)
@@ -761,7 +845,15 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // Write the program data to a tmp file first to ensure that if
         // the client crashes in the middle of the transfer, the client
         // wont have an invalid entry in its cache
-        std::string tmp_file = std::string("/tmp/") + path + ".tmp";
+        printf("============file %s is about write to tmp\n", path);
+        std::string tmp_file = std::string(CACHE_TMP_DIR) + path;
+        // Still need to explicitly remove existing entry at given temp path
+        // in the case it is a directory
+        remove_identifier(tmp_file.c_str());
+        
+        // before write to tmp, make sure all the parent directory exist
+        ret = create_parent_directories(tmp_file.c_str());
+        if (ret == -1) return -errno;
         fd = open(tmp_file.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0777);
         if (fd == -1) {
             return -errno;
@@ -775,10 +867,11 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
             return -errno;
         }
         close(fd);
+        //before rename, make sure all the parent directory exist for the file
+        ret = create_parent_directories(cache_name);
+        if (ret == -1) return -errno;
         ret = rename(tmp_file.c_str(), cache_name);
-        if (ret == -1) {
-            return -errno;
-        }
+        if (ret == -1) return -errno;
 
         // modify last modified time for the cache version file
         // This should be safe to do unatomically because if this
