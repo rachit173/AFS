@@ -95,13 +95,12 @@ message FileSystemResponse {
 
 message FileSystemFetchRequest {
   string path = 1;
-  int32 size = 3;
-  int32 offset = 4;
 }
 
 message FileSystemFetchResponse {
   int32 status = 1;
-  string data = 2;
+  bytes data = 2;
+  uint32 size = 3;
   TimeSpec lastModification = 7;
 }
 
