@@ -244,8 +244,26 @@ class FileSystemClient {
         /**
          * Store data at given path, and create the version file
          */
-        int fetch(const char *path) {
-            return -1;
+        int fetch(const char *path, afs::FileSystemFetchResponse *response) {
+            afs::FileSystemFetchRequest request;
+            request.set_path(path);
+            ClientContext context;
+
+            Status status = stub_->Fetch(&context, request, response);
+
+            if (status.ok()) {
+                if (response->status() != 0) {
+                    errno = response->status();
+                    return -1;
+                } else {
+                    return 0;
+                }
+            } else {
+                std::cout << status.error_code() << ": " << status.error_message()
+                          << std::endl;
+                errno = ETIMEDOUT;
+                return -1;
+            }
         }
 
     private:
@@ -639,6 +657,9 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
     // check if a cache exist
     int get_new_file = 1;
     char *cache_name = get_cache_name(path);
+    int fd;
+    int ret;
+
     if(access(cache_name, F_OK ) == 0) {
         // file exists
         int ret = is_cache_valid(path);
@@ -658,30 +679,65 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // create a version file for the cache using the server returned timestamp
         // flags should also be passed to the server(?)
         // If there is any error the errono should be returned
-        if (strcmp( path, "/test_file" ) == 0) {
-            printf("============file %s is retrived from the server\n", path);
-            char str[] = "haha this is a new file from server\n";
-            char *cache_version_name = get_cache_version_name(path);
-            FILE * server_f = fopen(cache_name, "w");
-            for (int i = 0; str[i] != '\n'; i++) {
-                /* write to file using fputc() function */
-                fputc(str[i], server_f);
-            }
-            // modify last modified time for the cache version file
-            /*Mock server return*/
-            struct stat buf;
-            stat(path, &buf);
-            buf.st_mtim.tv_sec = 100;
-            /**/
-            FILE * version_f = fopen(cache_version_name, "w");
-            fclose(version_f);
-            struct utimbuf stat_time;
-            stat_time.modtime = buf.st_mtim.tv_sec;
-            utime(cache_version_name, &stat_time);
-            free(cache_version_name);
+        printf("============file %s is retrived from the server\n", path);
+        char *cache_version_name;
+        afs::FileSystemFetchResponse response;
+        FileSystemClient client(channel);
 
-            fclose(server_f);
+        // Get the file
+        ret = client.fetch(path, &response);
+        if (ret < 0) {
+            return -errno;
         }
+
+        // Write the program data to a tmp file first to ensure that if
+        // the client crashes in the middle of the transfer, the client
+        // wont have an invalid entry in its cache
+        std::string tmp_file = std::string("/tmp/") + path + ".tmp";
+        fd = open(tmp_file.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0777);
+        if (fd == -1) {
+            return -errno;
+        }
+        ret = write(fd, response.data().c_str(), response.size());
+        if (ret == -1) {
+            return -errno;
+        }
+        ret = fsync(fd);
+        if (ret == -1) {
+            return -errno;
+        }
+        close(fd);
+        ret = rename(tmp_file.c_str(), cache_name);
+        if (ret == -1) {
+            return -errno;
+        }
+
+        // modify last modified time for the cache version file
+        // This should be safe to do unatomically because if this
+        // crashes before we update the modtime, we will just use
+        // the old modtime which should be older
+        cache_version_name = get_cache_version_name(path);
+
+        // If the cache version file does not exist, create it
+        ret = access(cache_version_name, F_OK);
+        if (ret == -1 && errno == ENOENT) {
+            fd = open(cache_version_name, O_CREAT | O_WRONLY, 0777);
+            if (fd == -1) {
+                return -errno;
+            }
+            close(fd);
+        } else if (ret == -1) {
+            return -errno;
+        }
+
+        struct timespec times[2];
+        times[0].tv_sec = times[1].tv_sec = response.lastmodification().sec();
+        times[0].tv_nsec = times[1].tv_nsec = response.lastmodification().nsec();
+        ret = utimensat(0, cache_version_name, times, 0);
+        if (ret == -1) {
+            return -errno;
+        }
+        free(cache_version_name);
     }
 
 	int res;

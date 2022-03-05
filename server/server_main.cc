@@ -208,29 +208,49 @@ public:
   }
   Status Fetch(ServerContext* context, const FileSystemFetchRequest *request,
                   FileSystemFetchResponse *reply) override {
+    struct stat statbuf;
+    uint64_t size;
+    int ret;
     std::string path = serverPath(request->path());
-    int size = request->size();
-    int offset = request->offset();
-    std::string* data = reply->mutable_data();
-    if (size < 0) {
-      size = 64*1024*1024; // 64 MB default file size if not specified.
+    char *buf;
+
+    // Find out how big the file is
+    ret = stat(path.c_str(), &statbuf);
+    if (ret == -1) {
+      reply->set_status(errno);
+      return Status::OK;
     }
-    data->reserve(size+1);
+    size = statbuf.st_size;
+
+    // Right now we only support files up to 4G
+    if (size > 0xFFFFFFFF) {
+      reply->set_status(EFBIG);
+      return Status::OK;
+    }
+
+    reply->set_size(size);
+
     int fd = open(path.c_str(), O_RDONLY);
     if (fd == -1) {
       reply->set_status(errno);
     } else {
-      int res = pread(fd, data, size, offset);
-      reply->set_status(errno);
-      struct stat buf;
-      res = stat(path.c_str(), &buf);
+      buf = (char *)malloc(sizeof(char) * size);
+      if (buf == NULL) {
+        reply->set_status(ENOMEM);
+        return Status::OK;
+      }
+      int res = read(fd, buf, size);
       if (res == -1) {
         reply->set_status(errno);
       } else {
+        std::string data = std::string(buf);
+        reply->set_data(data);
         auto lastmodification = reply->mutable_lastmodification();
-        lastmodification->set_sec(buf.st_mtim.tv_sec);
-        lastmodification->set_nsec(buf.st_mtim.tv_nsec);
+        lastmodification->set_sec(statbuf.st_mtim.tv_sec);
+        lastmodification->set_nsec(statbuf.st_mtim.tv_nsec);
+        reply->set_status(0);
       }
+      free(buf);
     }
     close(fd);
     return Status::OK;
