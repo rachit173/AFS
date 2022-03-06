@@ -249,7 +249,7 @@ public:
       if (res == -1) {
         reply->set_status(errno);
       } else {
-        std::string data = std::string(buf);
+        std::string data = std::string(buf, size);
         reply->set_data(data);
         auto lastmodification = reply->mutable_lastmodification();
         lastmodification->set_sec(statbuf.st_mtim.tv_sec);
