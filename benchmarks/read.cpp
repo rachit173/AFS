@@ -9,7 +9,6 @@
 #include <chrono>
 #include <string>
 
-#define MOUNT_DIR "/users/bijan/mount/"
 #define CACHE_DIR "/tmp/afs_prototype/"
 
 uint64_t read_file(std::string filename, uint64_t size, char* buf) {
@@ -40,6 +39,7 @@ int main(int argc, char *argv[]) {
     uint64_t uncached_total = 0;
     uint64_t cached_total = 0;
     uint64_t filesize;
+    std::string mount_dir;
     std::string filename;
     struct stat statbuf;
     char *buf;
@@ -47,13 +47,15 @@ int main(int argc, char *argv[]) {
     int fd;
     int iterations = 50;
 
-    if (argc < 2) {
-        filename = "file";
-    } else {
-        filename = std::string(argv[1]);
+    if (argc < 3) {
+        std::cout << "Usage: " << argv[0] << " <fuse mount dir> <file to read>" << std::endl;
+        return -1;
     }
 
-    std::string file_path = MOUNT_DIR + filename;
+    mount_dir = std::string(argv[1]);
+    filename = std::string(argv[2]);
+
+    std::string file_path = mount_dir + filename;
     std::string cache_path = CACHE_DIR + filename;
 
     ret = stat(file_path.c_str(), &statbuf);
