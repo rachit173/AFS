@@ -1141,6 +1141,8 @@ static int afs_release(const char *path, struct fuse_file_info *fi) {
     if (fi) {
         close(fi->fh);
     }
+
+    return 0;
 }
 
 fuse_operations afs_oper_new() {
