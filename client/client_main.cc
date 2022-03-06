@@ -1104,6 +1104,28 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+int afs_fsync(const char * path, int isdatasync, struct fuse_file_info * fi) {
+
+    int fd;
+    (void) fi;
+	if(fi == NULL){
+        char *cache_name = get_cache_name(path);
+		fd = open(cache_name, O_WRONLY);
+        free(cache_name);
+    }
+	else {
+		fd = fi->fh;
+    }
+
+    int ret = fsync(fd);
+
+    if(fi == NULL)
+		close(fd);
+
+    if (ret < 0) return -errno;
+    return 0;
+}
+
 fuse_operations afs_oper_new() {
     fuse_operations ops;
  
@@ -1119,6 +1141,7 @@ fuse_operations afs_oper_new() {
     ops.write = afs_write; // write to an opened file
     ops.flush = afs_flush; // called once for system call close(), flush change to server
     ops.rename = afs_rename;
+    ops.fsync = afs_fsync;
     return ops;
 }
 
