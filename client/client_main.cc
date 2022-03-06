@@ -1145,8 +1145,8 @@ struct State {
 };
 
 int main(int argc, char* argv[]) {
-    if ((argc < 2)) {
-        fprintf(stderr, "Usage: %s <mountpoint>\n", argv[0]);
+    if ((argc < 3)) {
+        fprintf(stderr, "Usage: %s <ip:port> <mountpoint>\n", argv[0]);
         return 1;
     }
     umask(0);
@@ -1155,15 +1155,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     auto data = new State();
-    data->rootdir = argv[1];
+    std::string target_str = argv[1];
+    data->rootdir = argv[2];
 
-    std::string target_str = "localhost:50051";
-    channel = grpc::CreateChannel("localhost:50051", grpc::InsecureChannelCredentials());
+    channel = grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials());
     GreeterClient greeter(channel);
     
     std::string user("world");
     std::string reply = greeter.SayHello(user);
     std::cout << "Greeter received: " << reply << std::endl; 
-    auto fuse_stat =  fuse_main(argc, argv, &afs_oper, nullptr);
+    auto fuse_stat =  fuse_main(argc - 1, &argv[1], &afs_oper, nullptr);
     return fuse_stat;
 }
