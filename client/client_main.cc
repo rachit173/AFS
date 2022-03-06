@@ -1186,7 +1186,9 @@ int main(int argc, char* argv[]) {
     std::string target_str = argv[1];
     data->rootdir = argv[2];
 
-    channel = grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials());
+    grpc::ChannelArguments ch_args;
+    ch_args.SetMaxReceiveMessageSize(-1);
+    channel = grpc::CreateCustomChannel(target_str, grpc::InsecureChannelCredentials(), ch_args);
     GreeterClient greeter(channel);
     
     std::string user("world");
