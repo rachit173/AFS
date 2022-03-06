@@ -339,7 +339,7 @@ class FileSystemClient {
         int store(const char *path, const char *data, uint32_t size) {
             FileSystemStoreRequest request;
             request.set_path(path);
-            request.set_data(data);
+            request.set_data(std::string(data, size));
             request.set_size(size);
             FileSystemStoreResponse response;
             ClientContext context;
