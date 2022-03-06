@@ -1137,6 +1137,12 @@ int afs_fsync(const char * path, int isdatasync, struct fuse_file_info * fi) {
     return 0;
 }
 
+static int afs_release(const char *path, struct fuse_file_info *fi) {
+    if (fi) {
+        close(fi->fh);
+    }
+}
+
 fuse_operations afs_oper_new() {
     fuse_operations ops;
  
@@ -1151,6 +1157,7 @@ fuse_operations afs_oper_new() {
     ops.read = afs_read;// read a opened file
     ops.write = afs_write; // write to an opened file
     ops.flush = afs_flush; // called once for system call close(), flush change to server
+    ops.release = afs_release; // called once when the last reference to the file is closed
     ops.rename = afs_rename;
     ops.fsync = afs_fsync;
     return ops;
