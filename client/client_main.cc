@@ -441,7 +441,6 @@ class GreeterClient {
  * Return -1 and set errno on error
  */
 static int remove_identifier(const char *path) {
-    printf("===============about to remove path %s\n", path);
     struct stat stat;
     if (-1 == lstat(path, &stat)) {
         if (errno == ENOENT || errno == ENOTDIR) return 0;
@@ -457,7 +456,6 @@ static int remove_identifier(const char *path) {
         strncpy(cmd, cmd_perfix, strlen(cmd_perfix));
         cmd[strlen(cmd_perfix)] = '\0';
         strcat(cmd, path);
-        printf("===============command %s is about being executed\n", cmd);
 
         ret = system(cmd);
     }
@@ -547,8 +545,6 @@ static int time_cmp(struct timespec time1, struct timespec time2) {
 
 static int create_cache_version(const char* path, time_t sec, time_t nsec) {
     char *cache_version_name = get_cache_version_name(path);
-
-    printf("about to create a version for a cache. Cache version name is %s\n", cache_version_name);
 
     // to prevent directory and file namd collision
     // delete any existing entry with the same name
@@ -723,11 +719,7 @@ static int afs_getattr(const char *path, struct stat *stbuf,
     (void) fi;
 
     FileSystemClient client(channel);
-    if (client.getStat(path, stbuf) < 0){
-      printf("AAAAA");
-
-        return -errno;
-    }
+    if (client.getStat(path, stbuf) < 0) return -errno;
 
     return 0;
 }
@@ -856,10 +848,7 @@ static int afs_create(const char *path, mode_t mode,
 
     // create file on server-side
     FileSystemClient client(channel);
-    if (0 > client.create(path, mode)){
-        printf("CREATE: =============4errono returned%d\n", -errno);
-        return -errno;
-    }
+    if (0 > client.create(path, mode)) return -errno;
 
     // remove any existing cache with the same name
     std::string cachePath = std::string(CACHE_DIR) + std::string(path);
@@ -870,26 +859,19 @@ static int afs_create(const char *path, mode_t mode,
     if (ret == -1) return -errno;
     unlink(cachePath.c_str());
     ret = creat(cachePath.c_str(), 0777);
-    if (ret == -1) {
-        printf("CREATE: =============3errono returned%d\n", -errno);
-        return -errno;
-    }
+    if (ret == -1) return -errno;
 
     fi->fh = ret;
 
     // create the version file
     struct stat st;
-    if (client.getStat(path, &st) < 0){
-        printf("CREATE: =============2errono returned%d\n", -errno);
-        return -errno;
-    }
+    if (client.getStat(path, &st) < 0) return -errno;
 
     if (0 > (
             ret = create_cache_version(
                 path,
                 st.st_mtim.tv_sec,
                 st.st_mtim.tv_nsec))) {
-        printf("CREATE: =============1errono returned%d\n", ret);
         return ret;
     }
 
@@ -902,7 +884,6 @@ static int afs_create(const char *path, mode_t mode,
  * If file not exist, throw error 
  */
 static int afs_open(const char *path, struct fuse_file_info *fi) {
-    printf("============open file %s\n", path);
     // check if a cache exist
     int cache_is_valid = 0;
 
@@ -913,7 +894,6 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
     if(access(cache_name, F_OK ) == 0) {
         // cache file exists
         int ret = is_cache_valid(path);
-        printf("============is cache valid %d\n", ret);
         if (1 == ret) { // cache is valid and file exist on server
             cache_is_valid = 1;
             /*
@@ -938,7 +918,6 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // retrive a new copy from server, and replcae the cached file
         // create a version file for the cache using the server returned timestamp
         // If there is any error the errono should be returned
-        printf("============file %s is retrived from the server\n", path);
         afs::FileSystemFetchResponse response;
         FileSystemClient client(channel);
 
@@ -951,7 +930,6 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         // Write the program data to a tmp file first to ensure that if
         // the client crashes in the middle of the transfer, the client
         // wont have an invalid entry in its cache
-        printf("============file %s is about write to tmp\n", path);
         std::string tmp_file = std::string(CACHE_TMP_DIR) + path;
         // Still need to explicitly remove existing entry at given temp path
         // in the case it is a directory
@@ -1041,7 +1019,6 @@ static int afs_write(const char *path, const char *buf, size_t size,
 	int res;
     std::string cache_name = std::string(CACHE_DIR) + std::string(path);
     std::string cache_version_name = std::string(CACHE_VERSION_DIR) + std::string(path);
-    printf("======write %s to cache size: %ld\n", buf, size);
 
 	(void) fi;
 	if(fi == NULL)
@@ -1066,7 +1043,6 @@ static int afs_write(const char *path, const char *buf, size_t size,
     if (ret == -1) return -errno; // cache corrupted, exit client
 
     if (time_cmp(cache_st.st_mtim, cache_version_st.st_mtim) != 1) {
-        printf("===========cache %s time needs to be modified \n", cache_name.c_str());
         // if the last modifed timestamp for cache is not newer than the version
         // manually set the time to be 1 ns increment from the version time stamp
         struct timespec times[2];
@@ -1074,7 +1050,6 @@ static int afs_write(const char *path, const char *buf, size_t size,
         times[0].tv_nsec = times[1].tv_nsec = cache_version_st.st_mtim.tv_nsec + 1;
         ret = utimensat(0, cache_name.c_str(), times, 0);
         if (ret == -1) return -errno; // cache corrupted, exit client
-        printf("===========cache modification finished \n");
     }
 
 	if(fi == NULL)
@@ -1107,7 +1082,6 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         char* data = new char[size];
         rewind(f);
         fread(data, sizeof(char), size, f);
-        printf("======flush data %s to server \n", data);
         fclose(f);
 
         FileSystemClient client(channel);
