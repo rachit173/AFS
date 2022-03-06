@@ -112,6 +112,7 @@ message FileSystemStoreRequest {
 
 message FileSystemStoreResponse {
   int32 status = 1;
+  TimeSpec lastModification = 2;
 }
 
 service FileSystem {

@@ -78,6 +78,34 @@ struct dir_structure {
     int length;
 };
 
+/**
+ * Get the path of the cache for a given file/directory path
+ * The caller needs to free the memory for the return
+ */
+static char *get_cache_name(const char *path) {
+    int path_length = strlen(path);
+    int dir_length = strlen(CACHE_DIR);
+    
+    char *cache_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
+    strcat(cache_name, CACHE_DIR);
+    strcat(cache_name, path);
+    return cache_name;
+}
+
+/**
+ * Get the path to the meta data for cache for a given file/directory path
+ * The caller needs to free the memory for the return
+ */
+static char *get_cache_version_name(const char *path) {
+    int path_length = strlen(path);
+    int dir_length = strlen(CACHE_VERSION_DIR);
+    
+    char *cache_version_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
+    strcat(cache_version_name, CACHE_VERSION_DIR);
+    strcat(cache_version_name, path);
+    return cache_version_name;
+}
+
 class FileSystemClient {
     public:
         FileSystemClient(std::shared_ptr<Channel> channel)
@@ -332,6 +360,16 @@ class FileSystemClient {
                   errno = response.status();
                   return -1;
                 }
+
+                // after store, update the cache version with the server's version
+                struct timespec times[2];
+                times[0].tv_sec = times[1].tv_sec = response.lastmodification().sec();
+                times[0].tv_nsec = times[1].tv_nsec = response.lastmodification().nsec();
+                char *cache_version_name = get_cache_version_name(path);
+                int ret = utimensat(0, cache_version_name, times, 0);
+                free(cache_version_name);
+                if (ret < 0) return -1;
+                
                 return 1;
             } else {
                 errno = ETIMEDOUT;
@@ -495,34 +533,6 @@ static int create_parent_directories(const char *path) {
     }
 
     return 0;
-}
-
-/**
- * Get the path of the cache for a given file/directory path
- * The caller needs to free the memory for the return
- */
-static char *get_cache_name(const char *path) {
-    int path_length = strlen(path);
-    int dir_length = strlen(CACHE_DIR);
-    
-    char *cache_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
-    strcat(cache_name, CACHE_DIR);
-    strcat(cache_name, path);
-    return cache_name;
-}
-
-/**
- * Get the path to the meta data for cache for a given file/directory path
- * The caller needs to free the memory for the return
- */
-static char *get_cache_version_name(const char *path) {
-    int path_length = strlen(path);
-    int dir_length = strlen(CACHE_VERSION_DIR);
-    
-    char *cache_version_name = (char*)calloc(path_length + dir_length + 1, sizeof(char));
-    strcat(cache_version_name, CACHE_VERSION_DIR);
-    strcat(cache_version_name, path);
-    return cache_version_name;
 }
 
 /**
@@ -1086,6 +1096,7 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
 
         FileSystemClient client(channel);
         if (client.store(path, data, size) < 0) return -errno;
+
     } else if (0 > ret){
         return ret;
     }

@@ -300,7 +300,17 @@ public:
       return Status::OK;
     }
 
+    // get the last modification timestamp 
+    struct stat st;
+    TimeSpec *lastModification;
+    errno = 0;
+    res = stat(path.c_str(), &st);
+
     reply->set_status(0);
+
+    lastModification = reply->mutable_lastmodification();
+    lastModification->set_sec(st.st_mtim.tv_sec);
+    lastModification->set_nsec(st.st_mtim.tv_nsec);
 
     return Status::OK;
   }
