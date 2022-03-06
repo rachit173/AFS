@@ -924,7 +924,6 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
             }*/
         } else if (0 > ret) {
             // some error happened, either the cache is corrupted or the file is not on server
-            // need to handle the case for creation flag on?
 
             // unlink cache copy
             std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
@@ -936,9 +935,8 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
     }
 
     if (cache_is_valid == 0) {
-        // retrive a new copy from server, and replcae the cached file TODO
+        // retrive a new copy from server, and replcae the cached file
         // create a version file for the cache using the server returned timestamp
-        // flags should also be passed to the server(?)
         // If there is any error the errono should be returned
         printf("============file %s is retrived from the server\n", path);
         afs::FileSystemFetchResponse response;
@@ -1041,22 +1039,43 @@ static int afs_write(const char *path, const char *buf, size_t size,
 {
 	int fd;
 	int res;
-    char *cache_name = get_cache_name(path);
+    std::string cache_name = std::string(CACHE_DIR) + std::string(path);
+    std::string cache_version_name = std::string(CACHE_VERSION_DIR) + std::string(path);
     printf("======write %s to cache size: %ld\n", buf, size);
 
 	(void) fi;
 	if(fi == NULL)
-		fd = open(cache_name, O_WRONLY);
+		fd = open(cache_name.c_str(), O_WRONLY);
 	else
 		fd = fi->fh;
-    free(cache_name);
 
-	if (fd == -1)
-		return -errno;
+	if (fd == -1) return -errno;
 
 	res = pwrite(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
+	if (res == -1) res = -errno;
+
+    // compare the last modified time of the cache file and the version
+    // If the same do some increment
+
+    struct stat cache_st;
+    struct stat cache_version_st;
+    int ret;
+    ret = stat(cache_name.c_str(), &cache_st);
+    if (ret == -1) return -errno; // cache corrupted, exit client
+    ret = stat(cache_version_name.c_str(), &cache_version_st);
+    if (ret == -1) return -errno; // cache corrupted, exit client
+
+    if (time_cmp(cache_st.st_mtim, cache_version_st.st_mtim) != 1) {
+        printf("===========cache %s time needs to be modified \n", cache_name.c_str());
+        // if the last modifed timestamp for cache is not newer than the version
+        // manually set the time to be 1 ns increment from the version time stamp
+        struct timespec times[2];
+        times[0].tv_sec = times[1].tv_sec = cache_version_st.st_mtim.tv_sec + 1;
+        times[0].tv_nsec = times[1].tv_nsec = cache_version_st.st_mtim.tv_nsec + 1;
+        ret = utimensat(0, cache_name.c_str(), times, 0);
+        if (ret == -1) return -errno; // cache corrupted, exit client
+        printf("===========cache modification finished \n");
+    }
 
 	if(fi == NULL)
 		close(fd);
