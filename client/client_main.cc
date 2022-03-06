@@ -554,6 +554,7 @@ static int time_cmp(struct timespec time1, struct timespec time2) {
 }
 
 static int create_cache_version(const char* path, time_t sec, time_t nsec) {
+    std::string cachePath = std::string(CACHE_DIR) + std::string(path);
     char *cache_version_name = get_cache_version_name(path);
 
     // to prevent directory and file namd collision
@@ -577,6 +578,16 @@ static int create_cache_version(const char* path, time_t sec, time_t nsec) {
     if (ret == -1) {
         return -errno;
     }
+
+    // On opens, the cache file will be created at a later time than
+    // the modified time returned from the server, so to prevent
+    // the file from looking dirty when it's not, set it's modified
+    // time to be the same as the cache file
+    ret = utimensat(0, cachePath.c_str(), times, 0);
+    if (ret == -1) {
+        return -errno;
+    }
+
     return 1;
 }
 
