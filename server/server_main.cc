@@ -335,6 +335,8 @@ void RunServer(std::string root) {
   // clients. In this case it corresponds to an *synchronous* service.
   builder.RegisterService(&service);
   builder.RegisterService(&afs_service);
+  builder.SetMaxReceiveMessageSize(1 * 1024 * 1024 * 1024 + 1); // 1GB
+  builder.SetMaxMessageSize(1 * 1024 * 1024 * 1024 + 1); // 1GB
   // Finally assemble the server.
   std::unique_ptr<Server> server(builder.BuildAndStart());
   std::cout << "Server listening on " << server_address << std::endl;

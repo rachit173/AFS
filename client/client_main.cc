@@ -368,7 +368,7 @@ class FileSystemClient {
         int store(const char *path, const char *data, uint32_t size) {
             FileSystemStoreRequest request;
             request.set_path(path);
-            request.set_data(data);
+            request.set_data(std::string(data, size));
             request.set_size(size);
             FileSystemStoreResponse response;
             ClientContext context;
@@ -530,35 +530,32 @@ static int remove_identifier(const char *path) {
     return ret;
 }
 
-/**
- * Given a path of a file, and create all of its parent directories
- */
 static int create_parent_directories(const char *path) {
-    char tmp[strlen(path) + 1];
-    char prefix[strlen(path) + 1];
-    prefix[0] = '/';
-    prefix[1] = '\0';
-    strncpy(tmp, path, strlen(path));
-    tmp[strlen(path)] = '\0';
+    std::string tmp = std::string(path);
+    std::string prefix = "";
+    std::string delimeter = "/";
+    std::string token;
+    size_t pos = 0;
 
-    char *token;
-    char *next_token;
-    token = strtok(tmp, "/");
-    next_token = strtok(NULL, "/");
     struct stat st = {0};
 
-    while (NULL != token) {
-        if (next_token != NULL) {// current token is a directory
-            strcat(prefix, token);
-            if (stat(prefix, &st) == -1) { // create the directory if it doesn't exist
-                if (mkdir(prefix, 0777) == -1) return -1;
-            }
-            strcat(prefix, "/");
-            token = next_token;
-            next_token = strtok(NULL, "/");
-        } else {// current token is a file, do nothing
-            token = next_token;
+    std::cout << "HELLO THERE " << path << std::endl;
+    while ((pos = tmp.find(delimeter)) != std::string::npos) {
+        token = tmp.substr(0, pos);
+        if (token.length() == 0) {
+            tmp.erase(0, 1);
+            continue;
         }
+        prefix = prefix + "/" + token;
+
+        // Create the directory if it doesn't exist
+        // This is a little racy, but maybe it's fine?
+        if (stat(prefix.c_str(), &st) == -1) {
+            if (mkdir(prefix.c_str(), 0777) == -1)
+                return -1;
+        }
+
+        tmp.erase(0, pos + delimeter.length());
     }
 
     return 0;
@@ -1274,7 +1271,9 @@ int main(int argc, char* argv[]) {
     std::string target_str = argv[1];
     data->rootdir = argv[2];
 
-    channel = grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials());
+    grpc::ChannelArguments ch_args;
+    ch_args.SetMaxReceiveMessageSize(-1);
+    channel = grpc::CreateCustomChannel(target_str, grpc::InsecureChannelCredentials(), ch_args);
     GreeterClient greeter(channel);
     
     std::string user("world");

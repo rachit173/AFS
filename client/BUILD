@@ -18,6 +18,7 @@ cc_binary(
   deps = [
     "//protos:afs_cc_grpc",
     "@com_github_grpc_grpc//:grpc++",
+    "@com_google_absl//absl/strings"
   ],
   copts = [
     "-I/usr/local/include/fuse3/",

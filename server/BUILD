@@ -8,5 +8,6 @@ cc_binary(
     "//protos:afs_cc_grpc",
     "@com_github_grpc_grpc//:grpc++_reflection",
     "@com_github_grpc_grpc//:grpc++",
+    "@com_google_absl//absl/strings"
   ],
 )
