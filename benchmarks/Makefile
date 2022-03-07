@@ -1,11 +1,14 @@
-all: read_test write_test
+all: read_test read_local write_test
 	echo "DONE"
 
 read_test: read.cpp
 	g++ read.cpp -o read_test
 
+read_local: read_local.cpp
+	g++ read_local.cpp -o read_local
+
 clean:
-	rm -rf read_test write_test
+	rm -rf read_test read_local write_test
 
 write_test: write_test.cpp
 	g++ write_test.cpp -o write_test
