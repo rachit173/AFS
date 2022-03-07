@@ -539,7 +539,6 @@ static int create_parent_directories(const char *path) {
 
     struct stat st = {0};
 
-    std::cout << "HELLO THERE " << path << std::endl;
     while ((pos = tmp.find(delimeter)) != std::string::npos) {
         token = tmp.substr(0, pos);
         if (token.length() == 0) {
