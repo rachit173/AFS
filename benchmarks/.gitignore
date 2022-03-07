@@ -1,4 +1,5 @@
 read_local
 read_test
+write_local
 write_test
 results/
