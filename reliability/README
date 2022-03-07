@@ -1,7 +1,13 @@
-To test client crash:
-1. add crash type when starting client (param 1 - 8), see ../run.sh
-2. add crash test type when running crash test (param 1 - 3):
-    1 - crash_open_read_test, for crash type 1 - 4
-    2 - crash_write_test, for crash type 5 - 6
-    3 - crash_flush_test, for crash type 7 - 8
+To test client/server crash:
+1. for client crash, add crash type when starting client (param 1 - 8), see ../run.sh
+2. for server crash, add crash type when starting server (param 1 - 4), see ../README
+3. add whether is client/server crash and crash test type when running crash test (param 1 - 3):
+  ./crash_test <is_client_crash> <crash_test_type>
+  is_client_crash:
+    1 - client crash
+    otherwise - server crash
+  crash_test_type:
+    1 - crash_open_read_test, for client crash type 1 - 4, server crash type 1 - 2
+    2 - crash_write_test, for crash type 5 - 6, server crash type 3 - 4
+    3 - crash_flush_test, for crash type 7 - 8, server crash type 3 - 4
 

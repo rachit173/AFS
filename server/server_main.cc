@@ -24,6 +24,27 @@
 #include "protos/afs.grpc.pb.h"
 #endif
 
+// variables and functions used for client crash
+#include <thread>
+bool crash_stat = false;
+bool crash_fetch = false;
+bool crash_store_before_write = false;
+bool crash_store_after_write = false;
+long crash_duration_ms = 3000;
+
+void unset_crash_flags() {
+  crash_stat = false;
+  crash_fetch = false;
+  crash_store_before_write = false;
+  crash_store_after_write = false;
+}
+
+void server_recovery() {
+  usleep(1000 * crash_duration_ms);
+  unset_crash_flags();
+}
+
+
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
@@ -187,6 +208,14 @@ public:
       ret = errno;
     }
 
+    /// crash point
+    if (crash_stat) {
+      errno = EPIPE;
+      std::thread t(server_recovery);
+      t.detach();
+      return Status(grpc::StatusCode::NOT_FOUND, "Server crash");
+    }
+
     reply->set_status(ret);
     reply->set_uid(buf.st_uid);
     reply->set_gid(buf.st_gid);
@@ -236,6 +265,14 @@ public:
 
     reply->set_size(size);
 
+    /// crash point
+    if (crash_fetch) {
+      errno = EPIPE;
+      std::thread t(server_recovery);
+      t.detach();
+      return Status(grpc::StatusCode::NOT_FOUND, "Server crash");
+    }
+
     int fd = open(path.c_str(), O_RDONLY);
     if (fd == -1) {
       reply->set_status(errno);
@@ -270,6 +307,14 @@ public:
     std::string tmp_path = path + ".tmp";
     int res;
     errno = 0;
+
+    /// crash point
+    if (crash_store_before_write) {
+      errno = EPIPE;
+      std::thread t(server_recovery);
+      t.detach();
+      return Status(grpc::StatusCode::NOT_FOUND, "Server crash");
+    }
 
     // First, write the changes to a temporary file
     int fd = open(tmp_path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0777);
@@ -311,6 +356,14 @@ public:
     lastModification = reply->mutable_lastmodification();
     lastModification->set_sec(st.st_mtim.tv_sec);
     lastModification->set_nsec(st.st_mtim.tv_nsec);
+
+    /// crash point
+    if (crash_store_after_write) {
+      errno = EPIPE;
+      std::thread t(server_recovery);
+      t.detach();
+      return Status(grpc::StatusCode::NOT_FOUND, "Server crash");
+    }
 
     return Status::OK;
   }
@@ -356,7 +409,31 @@ int main(int argc, char** argv) {
       fprintf(stderr, "Running server as root can cause security issues.\n");
       return 1;
   }
-  std::string targetdir(argv[1]);  
+  std::string targetdir(argv[1]);
+
+  // check if crash type is specified
+  if (argc >= 3) {
+    int crash_type = std::stoi(argv[2]);
+    switch (crash_type) {
+      case 1: {
+        crash_stat = true;
+        break;
+      }
+      case 2: {
+        crash_fetch = true;
+        break;
+      }
+      case 3: {
+        crash_store_before_write = true;
+        break;
+      }
+      case 4: {
+        crash_store_after_write = true;
+        break;
+      }
+    }
+  }
+
   RunServer(targetdir);
 
   return 0;

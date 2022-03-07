@@ -64,18 +64,27 @@ int write_file(std::string filename, const char* buf, uint64_t size) {
   return 0;
 }
 
-void crash_open_read_test() {
+void crash_open_read_test(bool is_client_crash) {
   restore_original_test_file();
 
   std::string crash_test_file_path = CrashTestMountDir + CrashTestFileName;
   char *buf = (char *)malloc(sizeof(char) * CrashTestFileOriginalContent.size());
 
-  // first read should fail due to crash
+  // client crash: first read should fail due to crash
+  // server crash: first read should succeed because of retrying
   int ret = read_file(crash_test_file_path, buf, CrashTestFileOriginalContent.size());
-  if (ret == -1) {
-    std::cout << "[CHECK] " << "pass: " << "first read failed due to crash" << std::endl;
+  if (is_client_crash) {
+    if (ret == -1) {
+      std::cout << "[CHECK] (client crash) " << "pass: " << "first read failed due to crash" << std::endl;
+    } else {
+      std::cout << "[CHECK] (client crash) " << "failed: " << "first read should fail due to crash" << std::endl;
+    }
   } else {
-    std::cout << "[CHECK] " << "failed: " << "first read should fail due to crash" << std::endl;
+    if (ret == -1) {
+      std::cout << "[CHECK] (server crash) " << "failed: " << "first read should succeed" << std::endl;
+    } else {
+      std::cout << "[CHECK] (server crash) " << "pass: " << "first read succeeds" << std::endl;
+    }
   }
 
   usleep(1000 * retry_gap_ms);
@@ -88,23 +97,32 @@ void crash_open_read_test() {
     if (std::string(buf) == CrashTestFileOriginalContent) {
       std::cout << "[CHECK] " << "pass: " << "second read succeed, file content is correct" << std::endl;
     } else {
+      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong, content: " << std::endl;
       printf("%s\n", buf);
-      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong" << std::endl;
     }
   }
 }
 
-void crash_write_test() {
+void crash_write_test(bool is_client_crash) {
   restore_original_test_file();
 
   std::string crash_test_file_path = CrashTestMountDir + CrashTestFileName;
 
-  // first write should fail due to crash
+  // client crash: first write should fail due to crash
+  // server crash: first write should succeed because of retrying
   int ret = write_file(crash_test_file_path, CrashTestFileWriteContent.c_str(), CrashTestFileWriteContent.size());
-  if (ret == -1) {
-    std::cout << "[CHECK] " << "pass: " << "first write failed due to crash" << std::endl;
+  if (is_client_crash) {
+    if (ret == -1) {
+      std::cout << "[CHECK] (client crash) " << "pass: " << "first write failed due to crash" << std::endl;
+    } else {
+      std::cout << "[CHECK] (client crash) " << "failed: " << "first write should fail due to crash" << std::endl;
+    }
   } else {
-    std::cout << "[CHECK] " << "failed: " << "first write should fail due to crash" << std::endl;
+    if (ret == -1) {
+      std::cout << "[CHECK] (server crash) " << "failed: " << "first write should succeed" << std::endl;
+    } else {
+      std::cout << "[CHECK] (server crash) " << "pass: " << "first write succeeds" << std::endl;
+    }
   }
 
   usleep(1000 * retry_gap_ms);
@@ -126,17 +144,19 @@ void crash_write_test() {
     if (std::string(read_buf) == CrashTestFileWriteContent) {
       std::cout << "[CHECK] " << "pass: " << "read succeed, file content is correct" << std::endl;
     } else {
-      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong" << std::endl;
+      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong, content: " << std::endl;
+      printf("%s\n", read_buf);
     }
   }
 }
 
-void crash_flush_test() {
+void crash_flush_test(bool is_client_crash) {
   restore_original_test_file();
 
   std::string crash_test_file_path = CrashTestMountDir + CrashTestFileName;
 
-  // write should succeed because crash on flush won't affect write
+  // client crash: write should succeed because crash on flush won't affect write
+  // server crash: write should succeed because of retrying
   int ret = write_file(crash_test_file_path, CrashTestFileWriteContent.c_str(), CrashTestFileWriteContent.size());
   if (ret == -1) {
     std::cout << "[CHECK] " << "failed: " << "write should succeed" << std::endl;
@@ -153,30 +173,33 @@ void crash_flush_test() {
     if (std::string(read_buf) == CrashTestFileWriteContent) {
       std::cout << "[CHECK] " << "pass: " << "read succeed, file content is correct" << std::endl;
     } else {
-      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong" << std::endl;
+      std::cout << "[CHECK] " << "failed: " << "second read succeed, file content is wrong, content" << std::endl;
+      printf("%s\n", read_buf);
     }
   }
 }
 
 /// set crash type before running this
 int main(int argc, char* argv[]) {
-  if ((argc < 2)) {
-    fprintf(stderr, "Usage: %s <crash_test_type>\n", argv[0]);
+  if ((argc < 3)) {
+    fprintf(stderr, "Usage: %s <crash_test_type> <is_client_crash>\n", argv[0]);
     return 1;
   }
 
-  int crash_test_type = std::stoi(argv[1]);
+  int is_client_crash = (std::stoi(argv[1]) == 1);
+
+  int crash_test_type = std::stoi(argv[2]);
   switch (crash_test_type) {
     case 1: {
-      crash_open_read_test();
+      crash_open_read_test(is_client_crash);
       break;
     }
     case 2: {
-      crash_write_test();
+      crash_write_test(is_client_crash);
       break;
     }
     case 3: {
-      crash_flush_test();
+      crash_flush_test(is_client_crash);
       break;
     }
   }

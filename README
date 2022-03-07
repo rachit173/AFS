@@ -3,7 +3,13 @@ AFSv1 using libfuse and gRPC
 For setup, run setup.sh
 
 Running the server
-bazel run //server:server
+bazel run //server:server -- <target_dir> <crash_type>
+
+crash_type:
+  1 - crash_stat
+  2 - crash_fetch
+  3 - crash_store_before_write
+  4 - crash_store_after_write
 
 Running the client
 First set 'user_allow_other' in /etc/fuse.conf
