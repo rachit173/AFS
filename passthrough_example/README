@@ -1,0 +1,8 @@
+to compile the code, run:
+    gcc -Wall passthrough.c `pkg-config fuse3 --cflags --libs` -o passthrough
+
+to run the executable:
+    ./passthrough <mounting directory path>
+
+to unmount directory:
+    sudo fusermount -u <mounting directory path>
