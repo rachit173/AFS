@@ -73,6 +73,35 @@ long request_retry_limit = 10;
 long request_retry_gap_ms = 1000;
 static std::shared_ptr<Channel> channel;
 
+// variables and functions used for client crash
+#include <thread>
+bool crash_open_before_fetch = false;
+bool crash_open_after_fetch = false;
+bool crash_read_before_read = false;
+bool crash_read_after_read = false;
+bool crash_write_before_write = false;
+bool crash_write_after_write = false;
+bool crash_flush_before_store = false;
+bool crash_flush_after_store = false;
+long crash_duration_ms = 500;
+
+void unset_crash_flags() {
+  crash_open_before_fetch = false;
+  crash_open_after_fetch = false;
+  crash_read_before_read = false;
+  crash_read_after_read = false;
+  crash_write_before_write = false;
+  crash_write_after_write = false;
+  crash_flush_before_store = false;
+  crash_flush_after_store = false;
+}
+
+void client_recovery() {
+  usleep(1000 * crash_duration_ms);
+  unset_crash_flags();
+}
+
+
 struct dir_structure {
     char **files;
     int length;
@@ -773,8 +802,6 @@ static int afs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
  */
 static int afs_mkdir(const char *path, mode_t mode)
 {
-    int res;
-
     // server-side
     FileSystemClient client(channel);
     if (-1 == client.mkdir(path)){
@@ -789,8 +816,6 @@ static int afs_mkdir(const char *path, mode_t mode)
  */
 static int afs_unlink(const char *path)
 {
-    int res;
-
     // unlink cache copy
     std::string cachePath = std::string(CACHE_DIR) + std::string(path);
     std::string cacheVersionPath = std::string(CACHE_VERSION_DIR) + std::string(path);
@@ -814,8 +839,6 @@ static int afs_unlink(const char *path)
  */
 static int afs_rmdir(const char *path)
 {
-    int res;
-
     // server-side
     FileSystemClient client(channel);
     if (client.rmdir(path) < 0){
@@ -836,8 +859,6 @@ static int afs_rmdir(const char *path)
  */
 static int afs_rename(const char *from, const char *to, unsigned int flags)
 {
-    int res;
-
     if (flags)
       return -EINVAL;
 
@@ -935,6 +956,14 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         }
     }
 
+    /// crash point
+    if (crash_open_before_fetch) {
+      errno = EPIPE;
+      std::thread t(client_recovery);
+      t.detach();
+      return -errno;
+    }
+
     if (cache_is_valid == 0) {
         // retrive a new copy from server, and replcae the cached file
         // create a version file for the cache using the server returned timestamp
@@ -993,6 +1022,14 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
         }
     }
 
+  /// crash point
+  if (crash_open_after_fetch) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
+
 	int res;
 	res = open(cache_name, fi->flags);
     free(cache_name);
@@ -1008,6 +1045,8 @@ static int afs_open(const char *path, struct fuse_file_info *fi) {
 static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+
+
 	int fd;
 	int res;
     char *cache_name = get_cache_name(path);
@@ -1021,9 +1060,25 @@ static int afs_read(const char *path, char *buf, size_t size, off_t offset,
 	if (fd == -1)
 		return -errno;
 
+  /// crash point
+  if (crash_read_before_read) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
+
 	res = pread(fd, buf, size, offset);
 	if (res == -1)
 		res = -errno;
+
+  /// crash point
+  if (crash_read_after_read) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
 
 	if(fi == NULL)
 		close(fd);
@@ -1049,8 +1104,24 @@ static int afs_write(const char *path, const char *buf, size_t size,
 
 	if (fd == -1) return -errno;
 
+  /// crash point
+  if (crash_write_before_write) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
+
 	res = pwrite(fd, buf, size, offset);
 	if (res == -1) res = -errno;
+
+  /// crash point
+  if (crash_write_after_write) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
 
     // compare the last modified time of the cache file and the version
     // If the same do some increment
@@ -1084,6 +1155,15 @@ static int afs_write(const char *path, const char *buf, size_t size,
 static int afs_flush(const char *path, struct fuse_file_info *fi)
 {
     int ret = is_cache_dirty(path);
+
+    /// crash point
+    if (crash_flush_before_store) {
+      errno = EPIPE;
+      std::thread t(client_recovery);
+      t.detach();
+      return -errno;
+    }
+
     if (ret == 1) {
         // only flush to server if the file is dirty
         // call the server call store
@@ -1112,6 +1192,14 @@ static int afs_flush(const char *path, struct fuse_file_info *fi)
         return ret;
     }
 
+  /// crash point
+  if (crash_flush_after_store) {
+    errno = EPIPE;
+    std::thread t(client_recovery);
+    t.detach();
+    return -errno;
+  }
+
 	return 0;
 }
 
@@ -1139,8 +1227,10 @@ int afs_fsync(const char * path, int isdatasync, struct fuse_file_info * fi) {
 
 static int afs_release(const char *path, struct fuse_file_info *fi) {
     if (fi) {
-        close(fi->fh);
+        int ret = close(fi->fh);
+        if (ret < 0) return -errno;
     }
+    return 0;
 }
 
 fuse_operations afs_oper_new() {
@@ -1189,7 +1279,48 @@ int main(int argc, char* argv[]) {
     
     std::string user("world");
     std::string reply = greeter.SayHello(user);
-    std::cout << "Greeter received: " << reply << std::endl; 
+    std::cout << "Greeter received: " << reply << std::endl;
+
+    // check if crash type is specified
+    if (argc >= 7) {
+      int crash_type = std::stoi(argv[6]);
+      switch (crash_type) {
+        case 1: {
+          crash_open_before_fetch = true;
+          break;
+        }
+        case 2: {
+          crash_open_after_fetch = true;
+          break;
+        }
+        case 3: {
+          crash_read_before_read = true;
+          break;
+        }
+        case 4: {
+          crash_read_after_read = true;
+          break;
+        }
+        case 5: {
+          crash_write_before_write = true;
+          break;
+        }
+        case 6: {
+          crash_write_after_write = true;
+          break;
+        }
+        case 7: {
+          crash_flush_before_store = true;
+          break;
+        }
+        case 8: {
+          crash_flush_after_store = true;
+          break;
+        }
+      }
+      --argc;
+    }
+
     auto fuse_stat =  fuse_main(argc - 1, &argv[1], &afs_oper, nullptr);
     return fuse_stat;
 }
