@@ -2,7 +2,6 @@ AFSv1 using libfuse and gRPC
 
 For setup, run setup.sh
 
-Running the server
 bazel run //server:server -- <target_dir> <crash_type>
 
 crash_type:
@@ -15,5 +14,22 @@ Running the client
 First set 'user_allow_other' in /etc/fuse.conf
 Then run: source run.sh
 
-The mountdir is mounted. Since no root dir is specified "/" is treated as the root directory.
+We would like to put the 30 points into performance
 
+1.1 Posix Compliance
+  client/client_main.cc lines 762-1230
+1.2 Protocol and semantics
+  Protocol Primitive
+    Whole file caching: client/client_main.cc lines 932-1019
+    File close: client/client_main.cc lines 1151-1200
+  Update Visibility
+    Flush on close: client/client_main.cc lines 1151-1200
+    Last writer wins: server/server_main.cc lines 265-316
+  Stale Cache
+    client_client_main.cc lines 623-649, 832-1019
+1.3 Durability
+  client/client_main.cc lines 971-1018
+  server/server_main.cc lines 265-316
+1.4 Crash Recovery
+  Design for client crash: client/client_main.cc lines 932-1019
+  Design for server crash: server/server_main.cc lines 265-316
